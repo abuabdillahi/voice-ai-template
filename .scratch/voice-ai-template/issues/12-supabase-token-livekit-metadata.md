@@ -1,0 +1,68 @@
+# Issue 12: Plumb Supabase JWT through LiveKit participant metadata
+
+Status: needs-triage
+Category: enhancement
+
+## Parent
+
+`.scratch/voice-ai-template/PRD.md`
+
+## What to build
+
+Currently the agent worker has no way to receive the user's Supabase access token, which means every per-user RLS-scoped write the agent performs (`set_preference`, `remember`, `start_conversation`, `append_message`, `end_conversation`) silently no-ops with a warning log. The user-facing demo of the template — "tell the agent your favorite color, sign out, sign back in, ask what your favorite color is" — does not work end-to-end until this is fixed.
+
+The fix is small and the scaffolding is already in place. `core.livekit.issue_token` should accept the user's Supabase access token (already in the API's request as the bearer header) and attach it to the LiveKit access token's `metadata` claim. The agent's `_resolve_supabase_token` helper already reads `claims.metadata` correctly and parses the JSON shape `{"supabase_access_token": "..."}` — once the token carries that metadata, every downstream persistence call starts working without further code changes.
+
+The end state, end-to-end:
+
+- User signs in via Supabase. Frontend has a Supabase session.
+- Frontend POSTs `/livekit/token` with its Supabase access token in the `Authorization: Bearer ...` header.
+- API route extracts the bearer token (it already does, for `get_current_user`), passes it to `core.livekit.issue_token`, which embeds it in the LiveKit token's metadata.
+- Frontend joins LiveKit with the issued token.
+- Agent worker accepts the dispatch, calls `_resolve_supabase_token(ctx)`, gets the Supabase JWT.
+- Agent's tool calls and conversation-persistence hooks pass the token to `core.preferences`, `core.memory`, `core.conversations`. All RLS-scoped writes now persist correctly.
+
+## Acceptance criteria
+
+### `packages/core/core/livekit.py`
+
+- [ ] `issue_token` accepts an optional `supabase_access_token: str | None = None` keyword argument.
+- [ ] When provided, the access token is JSON-encoded as `{"supabase_access_token": "..."}` and attached to the LiveKit token via `AccessToken.with_metadata(...)`.
+- [ ] Existing call sites that pass no token continue to work unchanged (default `None` → no metadata).
+- [ ] Unit test in `packages/core/tests/unit/test_livekit.py` covers: with-token sets metadata correctly, without-token leaves metadata empty/absent, decoded LiveKit JWT round-trips the metadata.
+
+### `apps/api`
+
+- [ ] The `POST /livekit/token` route handler extracts the bearer token from the request's `Authorization` header (it currently does this implicitly via `get_current_user`; needs an additional explicit extraction to forward the raw token).
+- [ ] The handler passes the bearer token to `core.livekit.issue_token` as `supabase_access_token=...`.
+- [ ] Test in `apps/api/tests/unit/test_livekit_token.py`: the issued LiveKit token, when decoded, includes the Supabase access token in its metadata claim. Use a JWT-decoding helper (no signature verification needed for the test).
+
+### `apps/agent/agent/session.py`
+
+- [ ] Remove the `TODO(issue 09)` comment in `_resolve_supabase_token`. Replace with a brief note that the metadata round-trip is wired up.
+- [ ] No structural change required — the helper already does the right thing once metadata is present.
+- [ ] Existing graceful-degrade path stays in place for the case where the token is somehow still absent (defence in depth).
+
+### Tests confirming end-to-end behaviour
+
+- [ ] `apps/agent/tests/integration/test_session_persistence.py` (and the equivalent tests for preferences and memory): swap the harness fixture so the participant's token carries a fake Supabase JWT in metadata. Assert that `_resolve_supabase_token` returns the fake JWT and that the persistence hooks call into `core.preferences` / `core.memory` / `core.conversations` with that token (rather than the current `None` / no-op path).
+
+### Documentation
+
+- [ ] `README.md` "Voice loop setup" section gains a one-paragraph note that the Supabase access token rides inside the LiveKit token's metadata claim, with a brief security note (LiveKit metadata is visible to the issuing client; this is acceptable since the same user already possesses both tokens, but downstream apps with stricter requirements should consider passing the token via a server-side relay instead).
+
+### Verification
+
+- [ ] `UV_CACHE_DIR="$PWD/.uv-cache" pnpm exec turbo run lint typecheck test --force` exits 0 across all packages.
+- [ ] `pnpm exec prettier --check .` exits 0.
+- [ ] On a manual run with real Supabase + LiveKit + OpenAI accounts: signing in, telling the agent "my favorite color is blue," signing out, signing back in, and asking "what's my favorite color?" produces the answer "blue" — i.e. the originally-promised demo from issue 07.
+
+## Blocked by
+
+None — all dependencies (issues 04, 05, 07, 08, 09) are merged. Can start immediately.
+
+## Comments
+
+> *This was generated by AI during triage.*
+
+**2026-05-04 — Issue created.** Captures the deliberately-deferred Supabase-token plumbing originally noted as a `TODO(issue 09)` in `apps/agent/agent/session.py:334` and as graceful-degrade paths in `core.preferences`, `core.memory`, and `core.conversations`. The TODO was scoped to issue 09 in the comment but the impact is broader — it affects every RLS-scoped write the agent performs across issues 07, 08, and 09. Promoting to its own ticket so the work is visible and trackable rather than buried in inline TODOs.

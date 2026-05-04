@@ -326,16 +326,15 @@ def _resolve_supabase_token(ctx: JobContext) -> str | None:
     """Recover the user's Supabase JWT for token-scoped persistence.
 
     LiveKit lets a participant attach metadata to their join token. The
-    web client can stash the access token there so the worker can
-    propagate it to RLS-scoped database calls. Issue 04 minted the
-    token without metadata; later slices add this field, so for now we
-    return None and the persistence layer degrades gracefully.
+    API can stash the user's Supabase access token there so the worker
+    can propagate it to RLS-scoped database calls. Expected shape when
+    present: ``{"supabase_access_token": "<jwt>"}`` JSON-encoded.
 
-    TODO(issue 09): once `core.livekit.issue_token` carries the
-    Supabase JWT in the participant metadata, parse it here and return
-    it. Until then, conversation rows are skipped — the AC's "the
-    Supabase-token plumbing is verified" allowance for graceful
-    degradation in the absence of plumbing applies.
+    Tracked by issue 12 (`.scratch/voice-ai-template/issues/12-supabase-token-livekit-metadata.md`).
+    Until that issue lands, ``core.livekit.issue_token`` mints tokens
+    without metadata and this helper returns ``None``. The persistence
+    layer degrades gracefully in that case: each hook logs a warning
+    and skips the write rather than tearing down a live conversation.
     """
     try:
         claims = ctx.token_claims()
