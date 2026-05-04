@@ -157,6 +157,36 @@ The default realtime model is OpenAI's `gpt-realtime`.
 
 Subsequent slices may swap providers; the swap point is a single function in `core.realtime`. See `core/realtime.py` for the seam.
 
+### Observability
+
+The agent worker emits one structured `turn_metrics` JSON log line per LiveKit metric event (LLM TTFT, TTS TTFB, end-of-utterance delay, etc.) on stdout. The line carries the bound `session_id` and `user_id` contextvars, so a single conversation is grep-able from the worker's log stream:
+
+```sh
+docker logs voice-ai-agent | grep turn_metrics
+```
+
+A sample line:
+
+```json
+{
+  "event": "turn_metrics",
+  "metric_type": "llm_metrics",
+  "label": "openai-llm",
+  "request_id": "req-1",
+  "ttft": 0.18,
+  "duration": 0.42,
+  "completion_tokens": 42,
+  "prompt_tokens": 7,
+  "total_tokens": 49,
+  "session_id": "room-abc",
+  "user_id": "user-7",
+  "log_level": "info",
+  "timestamp": "2026-05-04T00:00:00Z"
+}
+```
+
+This is the minimum-viable monitoring agreed in the PRD. A richer observability stack — Langfuse for LLM traces, dashboards for aggregated latency, and client-side TTFA capture — is deferred to a future iteration.
+
 ## Adding tools
 
 Tools are the assistant's capabilities — anything beyond pure conversation. The template ships two example tools (`get_current_time`, `get_weather`) that demonstrate the canonical pattern. They live in [`packages/core/core/tools/examples.py`](./packages/core/core/tools/examples.py).

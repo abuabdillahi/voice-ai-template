@@ -29,7 +29,16 @@ from uuid import UUID
 import structlog
 from core.auth import User
 from core.config import Settings, get_settings
-from core.observability import setup_logging
+from core.observability import (
+    bind as bind_log_context,
+)
+from core.observability import (
+    handle_metrics_event,
+    setup_logging,
+)
+from core.observability import (
+    unbind as unbind_log_context,
+)
 from core.realtime import create_realtime_model
 from core.tools import (
     ToolContext as DomainToolContext,
@@ -199,6 +208,31 @@ def _wire_tool_call_forwarding(
     session.on("function_tools_executed", _on_executed)
 
 
+# ---------------------------------------------------------------------------
+# Issue 11 — TTFA metrics hook
+# ---------------------------------------------------------------------------
+# Subscribes the agent session to LiveKit's `metrics_collected` event
+# and forwards each event to `core.observability.handle_metrics_event`,
+# which emits one structured `turn_metrics` JSON log line per metric
+# the framework reports (LLM TTFT, TTS TTFB, EOU delay, etc).
+#
+# Kept in its own helper + delimiter block so the parallel issue 07
+# agent (which adds tool wiring above) and any future additions stay
+# additive and do not need to interleave with this seam.
+
+
+def _wire_metrics_logging(session: AgentSession[None]) -> None:
+    """Forward LiveKit metrics events to the structured logger."""
+
+    def _on_metrics(event: Any) -> None:
+        handle_metrics_event(event)
+
+    session.on("metrics_collected", _on_metrics)
+
+
+# ---------------------------------------------------------------------------
+
+
 async def entrypoint(ctx: JobContext) -> None:
     """LiveKit Agents entrypoint: join the room and run the voice loop.
 
@@ -223,20 +257,34 @@ async def entrypoint(ctx: JobContext) -> None:
     user = _resolve_user_from_ctx(ctx)
     deps = _SessionDeps(user=user, log=log.bind(user_id=str(user.id)))
 
+    # ------------------------------------------------------------------
+    # Issue 11 — bind session-scoped contextvars so every log line
+    # emitted during the session (including the per-turn metrics
+    # lines) carries `session_id` and `user_id`. The room name doubles
+    # as the session id; conversation-level binding lands in issue 09.
+    # ------------------------------------------------------------------
+    session_id = ctx.room.name
+    user_id_str = str(user.id)
+    bind_log_context(session_id=session_id, user_id=user_id_str)
+
     session = build_session(settings)
     agent = build_agent(deps)
 
     _wire_tool_call_forwarding(session, ctx, log)
+    _wire_metrics_logging(session)
 
     log.info(
         "agent.session.ready",
         worker_id=ctx.worker_id,
         room=ctx.room.name,
-        user_id=str(user.id),
+        user_id=user_id_str,
         tools=[t.name for t in all_tools()],
     )
 
-    await session.start(agent, room=ctx.room)
+    try:
+        await session.start(agent, room=ctx.room)
+    finally:
+        unbind_log_context("session_id", "user_id")
 
 
 def worker_options() -> WorkerOptions:
