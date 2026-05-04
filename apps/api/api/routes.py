@@ -115,14 +115,22 @@ def livekit_token(
 
     The route is a thin adapter over :func:`core.livekit.issue_token`.
     The token's ``identity`` is the Supabase user id and the room
-    defaults to ``user-{userId}`` when the client does not specify
-    one. The user's Supabase access token is embedded in the LiveKit
+    defaults to ``user-{userId}-{nonce}`` when the client does not
+    specify one. The trailing nonce is critical: LiveKit dispatches
+    agents on room *creation*, not on every participant join, so
+    reusing a stable room name across disconnect → reconnect cycles
+    leaves the second session running without an agent. A fresh room
+    name per token request guarantees a fresh dispatch.
+
+    The user's Supabase access token is embedded in the LiveKit
     token's ``metadata`` claim so the agent worker can forward it to
     RLS-scoped database calls (see :mod:`core.livekit` for the
     security trade-offs of that approach).
     """
+    import uuid as _uuid
+
     requested_room = payload.room if payload and payload.room else None
-    room = requested_room or f"user-{current_user.id}"
+    room = requested_room or f"user-{current_user.id}-{_uuid.uuid4().hex[:8]}"
     supabase_token = _bearer_token(authorization)
     token = issue_token(
         current_user,

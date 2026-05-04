@@ -22,7 +22,10 @@ def test_livekit_token_returns_payload_when_authenticated(
     assert set(body) == {"token", "url", "room"}
     assert isinstance(body["token"], str) and body["token"]
     assert body["url"] == "wss://test.livekit.cloud"
-    assert body["room"] == f"user-{fake_user.id}"
+    # Room name is `user-{userId}-{nonce}` so each token gets a fresh
+    # LiveKit room (agent dispatch fires on room creation, not on every
+    # join — reusing names breaks reconnect).
+    assert body["room"].startswith(f"user-{fake_user.id}-")
 
 
 def test_livekit_token_accepts_custom_room(authed_client: TestClient) -> None:
