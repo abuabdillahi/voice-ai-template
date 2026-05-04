@@ -39,6 +39,27 @@ class Settings(BaseSettings):
         ..., description="HS256 secret used by Supabase to sign user JWTs."
     )
 
+    # --- LiveKit (realtime media plane) ---
+    # All three LiveKit fields are required. The API mints tokens against
+    # the secret, the agent worker dials the URL, and a missing key in
+    # any environment is a configuration bug the application should
+    # surface at boot rather than at first request.
+    livekit_url: str = Field(
+        ...,
+        description=(
+            "WebSocket URL of the LiveKit server. LiveKit Cloud in "
+            "development (wss://<project>.livekit.cloud) or the "
+            "self-hosted server in production."
+        ),
+    )
+    livekit_api_key: str = Field(..., description="LiveKit API key.")
+    livekit_api_secret: str = Field(..., description="LiveKit API secret.")
+
+    # --- OpenAI ---
+    openai_api_key: str = Field(
+        ..., description="OpenAI API key used by the default realtime model."
+    )
+
     # --- HTTP / observability ---
     cors_origins: str = Field(
         default="http://localhost:5173",

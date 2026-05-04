@@ -40,5 +40,7 @@ COPY --from=builder --chown=appuser:appuser /workspace /workspace
 
 USER appuser
 
-# Agent dials out to LiveKit; no inbound port to expose.
-CMD ["python", "-m", "agent"]
+# Agent dials out to LiveKit; no inbound port to expose. The
+# livekit-agents CLI exposes `start` (production) and `dev` (verbose
+# logging, hot reload). The container ships the production form.
+CMD ["python", "-m", "agent", "start"]

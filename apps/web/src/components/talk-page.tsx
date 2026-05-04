@@ -1,0 +1,213 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { Mic, MicOff, PhoneCall, PhoneOff } from 'lucide-react';
+import { Room, RoomEvent, ConnectionState } from 'livekit-client';
+
+import { apiFetch } from '@/lib/api';
+import { useLivekitTranscript, type TranscriptEntry } from '@/lib/livekit-transcript';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+
+interface LivekitTokenResponse {
+  token: string;
+  url: string;
+  room: string;
+}
+
+type Status = 'idle' | 'connecting' | 'connected' | 'disconnected';
+
+/**
+ * Talk page — the default authenticated landing route.
+ *
+ * Lifecycle:
+ *
+ * 1. User clicks "Connect" → `connect` mutation fetches a token from
+ *    `/livekit/token` and joins the room.
+ * 2. Microphone toggle publishes/unpublishes the local audio track.
+ * 3. Transcript hook surfaces both the user's STT and the agent's
+ *    responses on the LiveKit data channel.
+ * 4. Disconnect tears the room down and clears state.
+ */
+export function TalkPage() {
+  const [room, setRoom] = useState<Room | null>(null);
+  const [status, setStatus] = useState<Status>('idle');
+  const [micEnabled, setMicEnabled] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const transcript = useLivekitTranscript(room);
+
+  // Hold a ref to the active room so cleanup on unmount can
+  // disconnect even if state has not yet flushed.
+  const roomRef = useRef<Room | null>(null);
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
+
+  useEffect(() => {
+    return () => {
+      void roomRef.current?.disconnect();
+    };
+  }, []);
+
+  const connectMutation = useMutation({
+    mutationFn: async (): Promise<{ room: Room; info: LivekitTokenResponse }> => {
+      const info = await apiFetch<LivekitTokenResponse>('/livekit/token', {
+        method: 'POST',
+        body: {},
+      });
+      const lkRoom = new Room({ adaptiveStream: true, dynacast: true });
+      lkRoom.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
+        if (state === ConnectionState.Connected) setStatus('connected');
+        else if (state === ConnectionState.Connecting) setStatus('connecting');
+        else if (state === ConnectionState.Reconnecting) setStatus('connecting');
+        else if (state === ConnectionState.Disconnected) setStatus('disconnected');
+      });
+      await lkRoom.connect(info.url, info.token);
+      return { room: lkRoom, info };
+    },
+    onMutate: () => {
+      setError(null);
+      setStatus('connecting');
+    },
+    onSuccess: ({ room: lkRoom }) => {
+      setRoom(lkRoom);
+      setStatus('connected');
+    },
+    onError: (err: unknown) => {
+      setError(err instanceof Error ? err.message : 'Failed to connect.');
+      setStatus('idle');
+    },
+  });
+
+  const disconnect = async (): Promise<void> => {
+    await room?.disconnect();
+    setRoom(null);
+    setMicEnabled(false);
+    setStatus('disconnected');
+  };
+
+  const toggleMic = async (): Promise<void> => {
+    if (!room) return;
+    const next = !micEnabled;
+    await room.localParticipant.setMicrophoneEnabled(next);
+    setMicEnabled(next);
+  };
+
+  const isConnecting = status === 'connecting' || connectMutation.isPending;
+
+  return (
+    <div className="flex w-full max-w-3xl flex-col gap-4">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <div>
+            <CardTitle>Talk to the assistant</CardTitle>
+            <CardDescription>Click connect, then unmute to start talking.</CardDescription>
+          </div>
+          <StatusPill status={status} />
+        </CardHeader>
+        <CardContent className="flex items-center gap-3">
+          {room ? (
+            <Button variant="destructive" onClick={() => void disconnect()} aria-label="Disconnect">
+              <PhoneOff className="mr-2 h-4 w-4" />
+              Disconnect
+            </Button>
+          ) : (
+            <Button
+              onClick={() => connectMutation.mutate()}
+              disabled={isConnecting}
+              aria-label="Connect"
+            >
+              <PhoneCall className="mr-2 h-4 w-4" />
+              {isConnecting ? 'Connecting…' : 'Connect'}
+            </Button>
+          )}
+          <Button
+            variant={micEnabled ? 'secondary' : 'outline'}
+            onClick={() => void toggleMic()}
+            disabled={!room}
+            aria-label={micEnabled ? 'Mute microphone' : 'Unmute microphone'}
+            aria-pressed={micEnabled}
+          >
+            {micEnabled ? (
+              <>
+                <Mic className="mr-2 h-4 w-4" />
+                Mic on
+              </>
+            ) : (
+              <>
+                <MicOff className="mr-2 h-4 w-4" />
+                Mic off
+              </>
+            )}
+          </Button>
+          {error && <span className="text-sm text-[hsl(var(--destructive))]">{error}</span>}
+        </CardContent>
+      </Card>
+
+      <Card className="flex-1">
+        <CardHeader>
+          <CardTitle className="text-base">Transcript</CardTitle>
+          <CardDescription>Updates live as you and the assistant speak.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <TranscriptPanel entries={transcript} />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function StatusPill({ status }: { status: Status }) {
+  const label =
+    status === 'connected'
+      ? 'Connected'
+      : status === 'connecting'
+        ? 'Connecting…'
+        : status === 'disconnected'
+          ? 'Disconnected'
+          : 'Idle';
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      className={cn(
+        'rounded-full px-3 py-1 text-xs font-medium',
+        status === 'connected' && 'bg-green-100 text-green-900',
+        status === 'connecting' && 'bg-amber-100 text-amber-900',
+        (status === 'disconnected' || status === 'idle') &&
+          'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]',
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function TranscriptPanel({ entries }: { entries: TranscriptEntry[] }) {
+  const items = useMemo(() => entries.filter((e) => e.text.trim().length > 0), [entries]);
+  if (items.length === 0) {
+    return (
+      <p className="text-sm text-[hsl(var(--muted-foreground))]">
+        No transcript yet. Say something once you are connected and unmuted.
+      </p>
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-2 text-sm">
+      {items.map((entry) => (
+        <li
+          key={entry.id}
+          className={cn(
+            'rounded-md px-3 py-2',
+            entry.role === 'user'
+              ? 'bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]'
+              : 'bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]',
+          )}
+        >
+          <span className="mr-2 text-xs uppercase tracking-wide opacity-70">{entry.role}</span>
+          {entry.text}
+        </li>
+      ))}
+    </ul>
+  );
+}

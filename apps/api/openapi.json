@@ -7,7 +7,9 @@
   "paths": {
     "/health": {
       "get": {
-        "tags": ["system"],
+        "tags": [
+          "system"
+        ],
         "summary": "Health",
         "description": "Liveness probe. Returns 200 with a static payload.",
         "operationId": "health_health_get",
@@ -27,7 +29,9 @@
     },
     "/me": {
       "get": {
-        "tags": ["auth"],
+        "tags": [
+          "auth"
+        ],
         "summary": "Me",
         "description": "Return the authenticated user's id and email.",
         "operationId": "me_me_get",
@@ -72,6 +76,73 @@
           }
         }
       }
+    },
+    "/livekit/token": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Livekit Token",
+        "description": "Mint a LiveKit access token for the authenticated user.\n\nThe route is a thin adapter over :func:`core.livekit.issue_token`;\nthe token's `identity` is the Supabase user id and the room\ndefaults to ``user-{userId}`` when the client does not specify one.",
+        "operationId": "livekit_token_livekit_token_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LivekitTokenRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivekitTokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -97,9 +168,57 @@
           }
         },
         "type": "object",
-        "required": ["status"],
+        "required": [
+          "status"
+        ],
         "title": "HealthResponse",
         "description": "Liveness probe payload."
+      },
+      "LivekitTokenRequest": {
+        "properties": {
+          "room": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Room",
+            "description": "Optional LiveKit room name; defaults to `user-{userId}`."
+          }
+        },
+        "type": "object",
+        "title": "LivekitTokenRequest",
+        "description": "Optional body for `/livekit/token`.\n\nThe room is optional \u2014 when omitted, the API picks the per-user\ndefault (``user-{userId}``). Letting the client name a room is\nuseful for tests and for future multi-room features but is not\nrequired by the demo."
+      },
+      "LivekitTokenResponse": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token",
+            "description": "Short-lived LiveKit access JWT."
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "LiveKit server URL the browser should dial."
+          },
+          "room": {
+            "type": "string",
+            "title": "Room",
+            "description": "Room name encoded in the token's grants."
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "url",
+          "room"
+        ],
+        "title": "LivekitTokenResponse",
+        "description": "Connection bundle returned to the browser."
       },
       "MeResponse": {
         "properties": {
@@ -113,7 +232,10 @@
           }
         },
         "type": "object",
-        "required": ["id", "email"],
+        "required": [
+          "id",
+          "email"
+        ],
         "title": "MeResponse",
         "description": "Authenticated user, projected for the wire."
       },
@@ -150,7 +272,11 @@
           }
         },
         "type": "object",
-        "required": ["loc", "msg", "type"],
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
         "title": "ValidationError"
       }
     }

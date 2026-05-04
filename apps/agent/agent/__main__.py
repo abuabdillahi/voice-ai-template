@@ -1,41 +1,26 @@
-"""Agent worker stub.
+"""Agent worker entrypoint.
 
-Logs a structured startup line and then sleeps indefinitely. The real
-LiveKit Agents worker (room subscription, voice loop, tool calling) is
-wired up in issue 05; this stub exists so the container has a sensible
-PID 1 process and so docker compose can bring the service to a running
-state for end-to-end smoke tests.
+Hands control to the livekit-agents CLI, which manages the worker
+lifecycle: registering with the LiveKit server, accepting dispatched
+jobs, calling our :func:`agent.session.entrypoint` per job, and
+handling SIGTERM gracefully.
+
+Invoke with `python -m agent dev` for a developer-friendly shell or
+`python -m agent start` for production. The LiveKit CLI subcommands
+are documented at https://docs.livekit.io/agents/.
 """
 
 from __future__ import annotations
 
-import json
-import sys
-import time
-from datetime import UTC, datetime
+from livekit.agents import cli
+
+from agent.session import worker_options
 
 
-def _log(event: str, **fields: object) -> None:
-    """Emit a single JSON line to stdout."""
-    payload = {
-        "ts": datetime.now(UTC).isoformat(),
-        "level": "info",
-        "service": "agent",
-        "event": event,
-        **fields,
-    }
-    print(json.dumps(payload), flush=True)
-
-
-def main() -> int:
-    _log("agent.startup", message="agent stub running; real worker arrives in issue 05")
-    try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        _log("agent.shutdown", reason="keyboard_interrupt")
-        return 0
+def main() -> None:
+    """Run the LiveKit Agents worker."""
+    cli.run_app(worker_options())
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

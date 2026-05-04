@@ -6,7 +6,7 @@ The full specification lives at [`.scratch/voice-ai-template/PRD.md`](./.scratch
 
 ## Status
 
-Foundation + auth tracer. The workspace skeleton, tooling, Docker, and the Supabase auth slice (sign-in, `/me`, JWT verification, generated TS types) are in place. Subsequent issues add the voice loop, tools, memory, and persistence.
+Foundation + auth tracer + voice loop tracer. Workspace skeleton, tooling, Docker, the Supabase auth slice, and the LiveKit + OpenAI Realtime voice loop are in place. Subsequent issues add tools, memory, and persistence.
 
 ## Getting started
 
@@ -79,13 +79,13 @@ docker compose up
 pnpm --filter @voice-ai/web dev
 ```
 
-For a production-shaped stack (api + agent + nginx-served web bundle):
+For a production-shaped stack (api + agent + nginx-served web bundle + self-hosted LiveKit):
 
 ```sh
 docker compose -f docker-compose.prod.yml up --build
 ```
 
-The `livekit-server` slot in `docker-compose.prod.yml` is commented out and is wired in issue 05.
+The production compose runs `livekit/livekit-server` alongside the application services. Defaults live in `livekit.yaml`; production deployers must replace the placeholder API key/secret pair (matching `.env`) and tune the UDP RTP port range to their network plan.
 
 ## Auth setup
 
@@ -112,6 +112,50 @@ The template uses Supabase for auth, Postgres, and (later) pgvector. Two flavour
 1. Install the [Supabase CLI](https://supabase.com/docs/guides/cli).
 2. From the repo root run `supabase start`. The CLI prints the local URL, anon key, and JWT secret — paste them into `.env` and the matching `VITE_SUPABASE_*` keys.
 3. Apply the bundled migrations: `supabase db reset`.
+
+## Voice loop setup
+
+The voice loop is real-time conversational audio over WebRTC, powered by LiveKit Agents in the backend and OpenAI Realtime as the speech-to-speech model. Two services need accounts.
+
+### LiveKit
+
+LiveKit owns the media plane (signalling + RTP). The dev posture is hosted; the production posture is self-hosted in compose.
+
+#### Development — LiveKit Cloud (recommended)
+
+1. Create a free project at <https://cloud.livekit.io>.
+2. From **Project Settings → Keys** copy the **API Key**, **API Secret**, and the **WebSocket URL** (`wss://<project>.livekit.cloud`). Paste them into `.env`:
+
+   ```
+   LIVEKIT_URL=wss://<project>.livekit.cloud
+   LIVEKIT_API_KEY=<api-key>
+   LIVEKIT_API_SECRET=<api-secret>
+   ```
+
+3. The agent worker dispatches into rooms automatically; no further LiveKit dashboard configuration is needed for the demo.
+
+#### Production — self-hosted (`docker-compose.prod.yml`)
+
+The production compose file boots `livekit/livekit-server` alongside the application services. Configure it via the committed `livekit.yaml`:
+
+1. Replace the placeholder line under `keys:` with the same `LIVEKIT_API_KEY: LIVEKIT_API_SECRET` pair you set in `.env`.
+2. Adjust the UDP RTP port range (`50000-50100` by default) and TURN block to match your network. Tight NATs typically need a real TURN-over-TCP shared secret.
+3. Update `LIVEKIT_URL` in `.env` to point at the in-cluster service (`ws://livekit-server:7880`) or the public hostname behind your TLS-terminating proxy.
+
+Switching between cloud and self-hosted is a single environment-variable change from the application's perspective; nothing in `apps/api`, `apps/agent`, or `apps/web` is aware of where LiveKit lives.
+
+### OpenAI
+
+The default realtime model is OpenAI's `gpt-realtime`.
+
+1. Create an account at <https://platform.openai.com> and provision an API key under **API keys**. The key needs access to the realtime model family.
+2. Paste it into `.env`:
+
+   ```
+   OPENAI_API_KEY=sk-<your-key>
+   ```
+
+Subsequent slices may swap providers; the swap point is a single function in `core.realtime`. See `core/realtime.py` for the seam.
 
 ### Generating the typed API client
 

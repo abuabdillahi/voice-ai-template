@@ -1,16 +1,8 @@
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
 
 import { supabase } from '@/lib/supabase';
-import { useUser } from '@/lib/auth';
-import { apiFetch } from '@/lib/api';
+import { TalkPage } from '@/components/talk-page';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-
-interface MeResponse {
-  id: string;
-  email: string;
-}
 
 export const Route = createFileRoute('/')({
   // RequireAuth: a redirect-based route guard that runs before the
@@ -22,52 +14,30 @@ export const Route = createFileRoute('/')({
       throw redirect({ to: '/sign-in' });
     }
   },
-  component: HomePage,
+  component: HomeRoute,
 });
 
-function HomePage() {
+function HomeRoute() {
   const navigate = useNavigate();
-  const { user, session } = useUser();
-
-  const meQuery = useQuery({
-    queryKey: ['me', session?.access_token ?? null],
-    queryFn: () => apiFetch<MeResponse>('/me'),
-    enabled: !!session,
-  });
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Signed in</CardTitle>
-          <CardDescription>
-            The /me API call confirms the FastAPI backend can verify the Supabase access token.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="text-sm">
-            <span className="font-medium">Supabase user email:&nbsp;</span>
-            {user?.email ?? '—'}
-          </div>
-          <div className="text-sm">
-            <span className="font-medium">/me endpoint email:&nbsp;</span>
-            {meQuery.isLoading
-              ? 'loading…'
-              : meQuery.isError
-                ? 'error'
-                : (meQuery.data?.email ?? '—')}
-          </div>
-          <Button
-            variant="outline"
-            onClick={async () => {
-              await supabase.auth.signOut();
-              void navigate({ to: '/sign-in' });
-            }}
-          >
-            Sign out
-          </Button>
-        </CardContent>
-      </Card>
+    <div className="flex min-h-screen flex-col">
+      <header className="flex items-center justify-between border-b border-[hsl(var(--border))] px-6 py-3">
+        <h1 className="text-lg font-semibold">Voice AI assistant</h1>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={async () => {
+            await supabase.auth.signOut();
+            void navigate({ to: '/sign-in' });
+          }}
+        >
+          Sign out
+        </Button>
+      </header>
+      <main className="flex flex-1 items-stretch justify-center px-4 py-6">
+        <TalkPage />
+      </main>
     </div>
   );
 }

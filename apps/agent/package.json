@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "echo \"agent: dev stub (worker wired up in issue 05)\"",
+    "dev": "uv run python -m agent dev",
     "build": "echo \"agent: no build task\"",
     "lint": "uv run ruff check . && uv run ruff format --check .",
     "format": "uv run ruff format .",

@@ -4,144 +4,240 @@
  */
 
 export interface paths {
-  '/health': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Health
+         * @description Liveness probe. Returns 200 with a static payload.
+         */
+        get: operations["health_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    /**
-     * Health
-     * @description Liveness probe. Returns 200 with a static payload.
-     */
-    get: operations['health_health_get'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/me': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    "/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Me
+         * @description Return the authenticated user's id and email.
+         */
+        get: operations["me_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
     };
-    /**
-     * Me
-     * @description Return the authenticated user's id and email.
-     */
-    get: operations['me_me_get'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
+    "/livekit/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Livekit Token
+         * @description Mint a LiveKit access token for the authenticated user.
+         *
+         *     The route is a thin adapter over :func:`core.livekit.issue_token`;
+         *     the token's `identity` is the Supabase user id and the room
+         *     defaults to ``user-{userId}`` when the client does not specify one.
+         */
+        post: operations["livekit_token_livekit_token_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-  schemas: {
-    /** HTTPValidationError */
-    HTTPValidationError: {
-      /** Detail */
-      detail?: components['schemas']['ValidationError'][];
+    schemas: {
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HealthResponse
+         * @description Liveness probe payload.
+         */
+        HealthResponse: {
+            /** Status */
+            status: string;
+        };
+        /**
+         * LivekitTokenRequest
+         * @description Optional body for `/livekit/token`.
+         *
+         *     The room is optional — when omitted, the API picks the per-user
+         *     default (``user-{userId}``). Letting the client name a room is
+         *     useful for tests and for future multi-room features but is not
+         *     required by the demo.
+         */
+        LivekitTokenRequest: {
+            /**
+             * Room
+             * @description Optional LiveKit room name; defaults to `user-{userId}`.
+             */
+            room?: string | null;
+        };
+        /**
+         * LivekitTokenResponse
+         * @description Connection bundle returned to the browser.
+         */
+        LivekitTokenResponse: {
+            /**
+             * Token
+             * @description Short-lived LiveKit access JWT.
+             */
+            token: string;
+            /**
+             * Url
+             * @description LiveKit server URL the browser should dial.
+             */
+            url: string;
+            /**
+             * Room
+             * @description Room name encoded in the token's grants.
+             */
+            room: string;
+        };
+        /**
+         * MeResponse
+         * @description Authenticated user, projected for the wire.
+         */
+        MeResponse: {
+            /** Id */
+            id: string;
+            /** Email */
+            email: string;
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
+        };
     };
-    /**
-     * HealthResponse
-     * @description Liveness probe payload.
-     */
-    HealthResponse: {
-      /** Status */
-      status: string;
-    };
-    /**
-     * MeResponse
-     * @description Authenticated user, projected for the wire.
-     */
-    MeResponse: {
-      /** Id */
-      id: string;
-      /** Email */
-      email: string;
-    };
-    /** ValidationError */
-    ValidationError: {
-      /** Location */
-      loc: (string | number)[];
-      /** Message */
-      msg: string;
-      /** Error Type */
-      type: string;
-      /** Input */
-      input?: unknown;
-      /** Context */
-      ctx?: Record<string, never>;
-    };
-  };
-  responses: never;
-  parameters: never;
-  requestBodies: never;
-  headers: never;
-  pathItems: never;
+    responses: never;
+    parameters: never;
+    requestBodies: never;
+    headers: never;
+    pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-  health_health_get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
+    health_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
     };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
+    me_me_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
         };
-        content: {
-          'application/json': components['schemas']['HealthResponse'];
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
-      };
     };
-  };
-  me_me_get: {
-    parameters: {
-      query?: never;
-      header?: {
-        authorization?: string | null;
-      };
-      path?: never;
-      cookie?: never;
+    livekit_token_livekit_token_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LivekitTokenRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LivekitTokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
     };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['MeResponse'];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['HTTPValidationError'];
-        };
-      };
-    };
-  };
 }

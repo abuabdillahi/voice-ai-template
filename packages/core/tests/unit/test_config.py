@@ -11,6 +11,10 @@ def test_settings_parses_cors_origins() -> None:
         supabase_url="https://example.supabase.co",
         supabase_anon_key="anon",
         supabase_jwt_secret="secret",
+        livekit_url="wss://example.livekit.cloud",
+        livekit_api_key="lk-key",
+        livekit_api_secret="lk-secret",
+        openai_api_key="sk-openai",
         cors_origins="http://localhost:5173, https://app.example.com ,",
     )
     assert settings.cors_origin_list == [
@@ -24,6 +28,10 @@ def test_get_settings_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_ANON_KEY", "anon")
     monkeypatch.setenv("SUPABASE_JWT_SECRET", "secret")
+    monkeypatch.setenv("LIVEKIT_URL", "wss://example.livekit.cloud")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "lk-key")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "lk-secret")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
 
     a = get_settings()
     b = get_settings()
