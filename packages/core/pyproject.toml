@@ -17,6 +17,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-asyncio>=0.24",
     "types-python-jose>=3.3.4.20240106",
 ]
 
@@ -30,6 +31,7 @@ packages = ["core"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+asyncio_mode = "auto"
 markers = [
     "integration: marks tests as integration (deselect with '-m \"not integration\"')",
 ]

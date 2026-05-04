@@ -6,7 +6,7 @@ The full specification lives at [`.scratch/voice-ai-template/PRD.md`](./.scratch
 
 ## Status
 
-Foundation + auth tracer + voice loop tracer. Workspace skeleton, tooling, Docker, the Supabase auth slice, and the LiveKit + OpenAI Realtime voice loop are in place. Subsequent issues add tools, memory, and persistence.
+Foundation + auth tracer + voice loop tracer + tool-calling tracer. Workspace skeleton, tooling, Docker, the Supabase auth slice, the LiveKit + OpenAI Realtime voice loop, and the tool-registration / dispatch layer with two example tools are in place. Subsequent issues add memory and persistence.
 
 ## Getting started
 
@@ -156,6 +156,33 @@ The default realtime model is OpenAI's `gpt-realtime`.
    ```
 
 Subsequent slices may swap providers; the swap point is a single function in `core.realtime`. See `core/realtime.py` for the seam.
+
+## Adding tools
+
+Tools are the assistant's capabilities — anything beyond pure conversation. The template ships two example tools (`get_current_time`, `get_weather`) that demonstrate the canonical pattern. They live in [`packages/core/core/tools/examples.py`](./packages/core/core/tools/examples.py).
+
+To add a new tool:
+
+1. Write an async function in a module under `core.tools` (or a downstream package). Decorate it with `@tool` from `core.tools`. The decorator captures the function name, the first paragraph of the docstring, and the JSON schema derived from the type-hinted parameters.
+
+   ```python
+   from core.tools import tool
+
+   @tool
+   async def lookup_user_orders(user_email: str) -> str:
+       """Look up the most recent orders placed by a customer."""
+       ...
+   ```
+
+2. Import the module once at process start so the decorator runs. `core.tools.__init__` imports `core.tools.examples` for the bundled tools; mirror that pattern for your own module.
+
+3. **Use `httpx.AsyncClient` with an explicit timeout** for any outbound HTTP, and return a graceful natural-language string when the upstream fails. Errors raised inside a tool handler are caught by `core.tools.dispatch` and returned to the model as `{"error": ...}` so the agent verbalises the failure rather than crashing the session.
+
+4. **Announce the tool in the system prompt** so the realtime model knows it can call it. The prompt lives at the top of `apps/agent/agent/session.py` (`SYSTEM_PROMPT`). Tools that aren't mentioned in the prompt rarely get called, even when registered.
+
+The tool's first parameter may optionally be typed as `ToolContext` to receive the authenticated `User` plus a structlog logger pre-bound with `tool_name`. The dispatcher injects it automatically and hides it from the model's schema.
+
+The `core.tools` registry is the only seam adapters use to enumerate or invoke tools. The agent worker calls `all_tools()` at session start to register them with LiveKit; future API endpoints can reuse the same registry without LiveKit being involved.
 
 ### Generating the typed API client
 

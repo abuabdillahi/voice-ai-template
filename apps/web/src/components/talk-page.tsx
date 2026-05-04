@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Mic, MicOff, PhoneCall, PhoneOff } from 'lucide-react';
+import { ChevronRight, Mic, MicOff, PhoneCall, PhoneOff } from 'lucide-react';
 import { Room, RoomEvent, ConnectionState } from 'livekit-client';
 
 import { apiFetch } from '@/lib/api';
 import { useLivekitTranscript, type TranscriptEntry } from '@/lib/livekit-transcript';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 
 interface LivekitTokenResponse {
@@ -25,8 +27,9 @@ type Status = 'idle' | 'connecting' | 'connected' | 'disconnected';
  * 1. User clicks "Connect" → `connect` mutation fetches a token from
  *    `/livekit/token` and joins the room.
  * 2. Microphone toggle publishes/unpublishes the local audio track.
- * 3. Transcript hook surfaces both the user's STT and the agent's
- *    responses on the LiveKit data channel.
+ * 3. Transcript hook surfaces three message types: user / assistant
+ *    utterances on `lk.transcription`, and tool calls on
+ *    `lk.tool-calls` — both emitted by the agent worker.
  * 4. Disconnect tears the room down and clears state.
  */
 export function TalkPage() {
@@ -184,7 +187,14 @@ function StatusPill({ status }: { status: Status }) {
 }
 
 function TranscriptPanel({ entries }: { entries: TranscriptEntry[] }) {
-  const items = useMemo(() => entries.filter((e) => e.text.trim().length > 0), [entries]);
+  const items = useMemo(
+    () =>
+      entries
+        .filter((e) => e.role === 'tool-call' || e.text.trim().length > 0)
+        .slice()
+        .sort((a, b) => a.createdAt - b.createdAt),
+    [entries],
+  );
   if (items.length === 0) {
     return (
       <p className="text-sm text-[hsl(var(--muted-foreground))]">
@@ -194,20 +204,87 @@ function TranscriptPanel({ entries }: { entries: TranscriptEntry[] }) {
   }
   return (
     <ul className="flex flex-col gap-2 text-sm">
-      {items.map((entry) => (
-        <li
-          key={entry.id}
-          className={cn(
-            'rounded-md px-3 py-2',
-            entry.role === 'user'
-              ? 'bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]'
-              : 'bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]',
-          )}
-        >
-          <span className="mr-2 text-xs uppercase tracking-wide opacity-70">{entry.role}</span>
-          {entry.text}
-        </li>
-      ))}
+      {items.map((entry) =>
+        entry.role === 'tool-call' ? (
+          <ToolCallEntry key={entry.id} entry={entry} />
+        ) : (
+          <UtteranceEntry key={entry.id} entry={entry} />
+        ),
+      )}
     </ul>
+  );
+}
+
+function UtteranceEntry({ entry }: { entry: TranscriptEntry }) {
+  const variant: 'default' | 'secondary' = entry.role === 'user' ? 'default' : 'secondary';
+  return (
+    <li
+      className={cn(
+        'rounded-md px-3 py-2',
+        entry.role === 'user'
+          ? 'bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]'
+          : 'bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]',
+      )}
+    >
+      <Badge variant={variant} className="mr-2 align-middle text-[10px] uppercase tracking-wide">
+        {entry.role}
+      </Badge>
+      <span>{entry.text}</span>
+    </li>
+  );
+}
+
+function ToolCallEntry({ entry }: { entry: TranscriptEntry }) {
+  const [open, setOpen] = useState(false);
+  const argsText = entry.args ? JSON.stringify(entry.args, null, 2) : '{}';
+  const resultText = entry.result ?? '';
+  return (
+    <li
+      className={cn(
+        'rounded-md border px-3 py-2',
+        entry.error
+          ? 'border-[hsl(var(--destructive))]/40 bg-[hsl(var(--destructive))]/5'
+          : 'border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40',
+      )}
+    >
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger
+          className="flex w-full items-center justify-between gap-2 text-left"
+          aria-label={`Toggle details for tool ${entry.text}`}
+        >
+          <span className="flex items-center gap-2">
+            <Badge
+              variant={entry.error ? 'destructive' : 'outline'}
+              className="text-[10px] uppercase tracking-wide"
+            >
+              tool
+            </Badge>
+            <code className="font-mono text-xs">{entry.text}</code>
+          </span>
+          <ChevronRight
+            className={cn('h-4 w-4 transition-transform', open && 'rotate-90')}
+            aria-hidden
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2 flex flex-col gap-2">
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-[hsl(var(--muted-foreground))]">
+              Arguments
+            </p>
+            <pre className="mt-1 overflow-x-auto rounded bg-[hsl(var(--background))] p-2 font-mono text-xs">
+              {argsText}
+            </pre>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wide text-[hsl(var(--muted-foreground))]">
+              Result
+            </p>
+            <pre className="mt-1 overflow-x-auto rounded bg-[hsl(var(--background))] p-2 font-mono text-xs">
+              {resultText || '(no result)'}
+            </pre>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </li>
   );
 }
