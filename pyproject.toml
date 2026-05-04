@@ -67,7 +67,7 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 show_error_codes = true
 pretty = true
-explicit_package_bases = true
+files = ["packages/core/core", "apps/api/api", "apps/agent/agent"]
 namespace_packages = true
 exclude = [
     "^\\.venv/",
@@ -83,13 +83,6 @@ exclude = [
 # hook invokes these targeted runs.
 [[tool.mypy.overrides]]
 module = ["tests.*"]
-ignore_missing_imports = true
-
-# Empty stub packages (no source yet) — keep strict mode but tolerate the
-# absence of typed bodies. Per-package overrides will be tightened as real
-# code lands in subsequent issues.
-[[tool.mypy.overrides]]
-module = ["api.*", "agent.*", "core.*"]
 ignore_missing_imports = true
 
 # `mem0ai` (the Python SDK behind `core.memory`) does not ship a
