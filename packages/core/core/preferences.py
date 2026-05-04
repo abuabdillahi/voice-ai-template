@@ -31,6 +31,98 @@ _list = builtins.list
 _TABLE = "user_preferences"
 
 
+# ---------------------------------------------------------------------------
+# Recognised-key catalogue.
+# ---------------------------------------------------------------------------
+# Issue 10 promotes a small set of keys from "anything the agent saves
+# via set_preference" to "keys the settings UI surfaces explicitly".
+# Settings-page writes flow through ``validate_preference`` so an
+# unknown key or an invalid value is rejected at the API edge rather
+# than silently stored. The agent's free-form path through
+# ``core.tools.preferences.set_preference`` is unchanged — it does not
+# call ``validate_preference``, deliberately, so the agent can save
+# arbitrary user-stated facts (favourite_color, dietary_restrictions,
+# anything else) without us having to extend this table first. The UI
+# is the only caller bound by this catalogue.
+#
+# The frontend mirrors these constants in TypeScript
+# (``apps/web/src/lib/voice-options.ts``); both lists are kept in
+# alphabetical order so a diff lines up review-by-eye.
+
+#: OpenAI Realtime voice ids the assistant can speak in. Sourced from
+#: the OpenAI Realtime API documentation. Updating this list is a
+#: deliberate template-edit action: a downstream fork that adds a new
+#: voice should add it here *and* in the TS mirror.
+OPENAI_REALTIME_VOICES: tuple[str, ...] = (
+    "alloy",
+    "ash",
+    "ballad",
+    "coral",
+    "echo",
+    "sage",
+    "shimmer",
+    "verse",
+)
+
+#: Settings-page key for the user's preferred display / spoken name.
+PREFERRED_NAME_KEY = "preferred_name"
+
+#: Settings-page key for the OpenAI Realtime voice the assistant uses.
+VOICE_KEY = "voice"
+
+#: Settings-page keys, in display order. Used by the ``PUT
+#: /preferences/{key}`` endpoint to validate the route parameter.
+SETTINGS_KEYS: tuple[str, ...] = (PREFERRED_NAME_KEY, VOICE_KEY)
+
+
+class PreferenceValidationError(ValueError):
+    """Raised when ``validate_preference`` rejects a key or value.
+
+    A ``ValueError`` subclass so existing handlers that catch
+    ``ValueError`` keep working; a distinct type so the API layer can
+    map it to a 400 without swallowing other ``ValueError``s.
+    """
+
+
+def validate_preference(key: str, value: Any) -> Any:
+    """Validate a settings-page preference write.
+
+    Returns the (possibly normalised) value on success; raises
+    :class:`PreferenceValidationError` otherwise. The function is the
+    single source of truth used by both the ``PUT /preferences/{key}``
+    handler and the agent worker's session-start read (defensively
+    re-validating values stored before this function existed).
+
+    Rules:
+
+    * ``preferred_name`` — non-empty string, trimmed; capped at 80
+      chars so a malicious / accidental novel does not blow up the
+      system prompt.
+    * ``voice`` — must be a member of :data:`OPENAI_REALTIME_VOICES`.
+    * Any other ``key`` — rejected. The settings UI is intentionally
+      narrow; the agent's free-form ``set_preference`` tool covers the
+      open-ended case via :mod:`core.preferences`.
+    """
+    if key == PREFERRED_NAME_KEY:
+        if not isinstance(value, str):
+            raise PreferenceValidationError(f"{PREFERRED_NAME_KEY!r} must be a string.")
+        trimmed = value.strip()
+        if not trimmed:
+            raise PreferenceValidationError(f"{PREFERRED_NAME_KEY!r} must not be empty.")
+        if len(trimmed) > 80:
+            raise PreferenceValidationError(
+                f"{PREFERRED_NAME_KEY!r} must be 80 characters or fewer."
+            )
+        return trimmed
+    if key == VOICE_KEY:
+        if not isinstance(value, str) or value not in OPENAI_REALTIME_VOICES:
+            raise PreferenceValidationError(
+                f"{VOICE_KEY!r} must be one of: {', '.join(OPENAI_REALTIME_VOICES)}."
+            )
+        return value
+    raise PreferenceValidationError(f"Unknown settings key: {key!r}.")
+
+
 def set(  # noqa: A001 - intentional shadowing; this is the public API name.
     user: User,
     key: str,
@@ -111,4 +203,14 @@ def list(  # noqa: A001 - intentional shadowing; this is the public API name.
     return {str(row["key"]): row["value"] for row in rows}
 
 
-__all__ = ["get", "list", "set"]
+__all__ = [
+    "OPENAI_REALTIME_VOICES",
+    "PREFERRED_NAME_KEY",
+    "PreferenceValidationError",
+    "SETTINGS_KEYS",
+    "VOICE_KEY",
+    "get",
+    "list",
+    "set",
+    "validate_preference",
+]

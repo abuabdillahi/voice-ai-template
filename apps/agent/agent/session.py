@@ -28,6 +28,7 @@ from uuid import UUID
 
 import structlog
 from core import conversations as core_conversations
+from core import preferences as core_preferences
 from core.auth import User
 from core.config import Settings, get_settings
 from core.observability import (
@@ -143,30 +144,92 @@ def _make_livekit_tool(schema_name: str, deps: _SessionDeps) -> Any:
     return _invoke
 
 
-def build_agent(deps: _SessionDeps | None = None) -> Agent:
+def build_agent(
+    deps: _SessionDeps | None = None,
+    *,
+    instructions: str | None = None,
+) -> Agent:
     """Construct the :class:`Agent` with the system prompt and tools.
 
     When ``deps`` is omitted, the agent is built without tools (the
     shape the issue-05 unit tests still rely on). The session
     entrypoint always passes ``deps`` so the live agent has tools.
+
+    ``instructions`` overrides the default :data:`SYSTEM_PROMPT` —
+    issue 10 uses this seam to inject a "call the user X" line built
+    by :func:`build_system_prompt` from their stored preferences.
     """
+    prompt = instructions if instructions is not None else SYSTEM_PROMPT
     if deps is None:
-        return Agent(instructions=SYSTEM_PROMPT)
+        return Agent(instructions=prompt)
 
     tools = [_make_livekit_tool(schema.name, deps) for schema in all_tools()]
-    return Agent(instructions=SYSTEM_PROMPT, tools=list(tools))
+    return Agent(instructions=prompt, tools=list(tools))
 
 
-def build_session(settings: Settings | None = None) -> AgentSession[None]:
+def build_session(
+    settings: Settings | None = None,
+    *,
+    voice: str | None = None,
+) -> AgentSession[None]:
     """Construct the :class:`AgentSession` with the realtime model.
 
     Factored out so tests can build a session without dispatching a
     real LiveKit job, and so the realtime model factory remains the
     only seam for swapping providers.
+
+    ``voice`` is the OpenAI Realtime voice id read at session start
+    from the user's stored preferences (issue 10). When ``None`` the
+    plugin's default voice is used.
     """
     settings = settings or get_settings()
-    model = create_realtime_model(settings)
+    model = create_realtime_model(settings, voice=voice)
     return AgentSession[None](llm=model)
+
+
+def _load_user_preferences(
+    user: User,
+    supabase_token: str | None,
+    log: Any,
+) -> tuple[str | None, str | None]:
+    """Read ``preferred_name`` and ``voice`` for the session start.
+
+    Returns ``(preferred_name, voice)``; either may be ``None``. When
+    the access token is missing or the read fails, both come back
+    ``None`` and the session falls back to the unbranded prompt and
+    the default voice. Failure to read preferences must not crash the
+    voice loop — same degradation principle as the rest of the
+    session bootstrap.
+    """
+    if supabase_token is None:
+        return (None, None)
+    try:
+        rows = core_preferences.list(user, access_token=supabase_token)
+    except Exception as exc:  # noqa: BLE001 — degrade rather than crash
+        log.warning("agent.preferences.read_failed", error=str(exc))
+        return (None, None)
+    raw_name = rows.get(core_preferences.PREFERRED_NAME_KEY)
+    raw_voice = rows.get(core_preferences.VOICE_KEY)
+    name: str | None = None
+    voice: str | None = None
+    if isinstance(raw_name, str) and raw_name.strip():
+        name = raw_name.strip()
+    if isinstance(raw_voice, str) and raw_voice in core_preferences.OPENAI_REALTIME_VOICES:
+        voice = raw_voice
+    return (name, voice)
+
+
+def build_system_prompt(preferred_name: str | None) -> str:
+    """Return the agent's system prompt, optionally personalised.
+
+    When ``preferred_name`` is set the prompt is appended with a line
+    instructing the model to address the user by that name. Kept as a
+    pure function so tests can assert the wiring without spinning up a
+    LiveKit session.
+    """
+    if not preferred_name:
+        return SYSTEM_PROMPT
+    return SYSTEM_PROMPT + f" The user prefers to be called {preferred_name}."
 
 
 def _wire_tool_call_forwarding(
@@ -452,8 +515,14 @@ async def entrypoint(ctx: JobContext) -> None:
     else:
         log.info("agent.conversation.skipped_no_token")
 
-    session = build_session(settings)
-    agent = build_agent(deps)
+    # Issue 10 — read settings-page preferences (preferred_name, voice)
+    # and thread them into the realtime model + system prompt. Both
+    # degrade to None silently when the token is missing or the read
+    # fails; the voice loop must keep working before persistence is
+    # wired end-to-end.
+    preferred_name, voice = _load_user_preferences(user, supabase_token, log)
+    session = build_session(settings, voice=voice)
+    agent = build_agent(deps, instructions=build_system_prompt(preferred_name))
 
     _wire_tool_call_forwarding(
         session,
@@ -517,6 +586,7 @@ __all__ = [
     "TOOL_CALLS_TOPIC",
     "build_agent",
     "build_session",
+    "build_system_prompt",
     "entrypoint",
     "worker_options",
 ]

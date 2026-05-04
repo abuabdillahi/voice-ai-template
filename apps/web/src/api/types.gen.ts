@@ -92,6 +92,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/preferences/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Upsert Preference
+         * @description Upsert a single preference for the authenticated user.
+         *
+         *     Validated against :func:`core.preferences.validate_preference`,
+         *     which today only accepts the settings-page keys
+         *     (:data:`core.preferences.SETTINGS_KEYS`). The free-form
+         *     ``set_preference`` agent tool remains available for keys outside
+         *     that catalogue — the settings page is intentionally narrower than
+         *     the agent's surface.
+         *
+         *     Returns 400 with a structured error body on validation failure,
+         *     401 without authentication, 200 on success.
+         */
+        put: operations["upsert_preference_preferences__key__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations": {
         parameters: {
             query?: never;
@@ -306,6 +336,35 @@ export interface components {
             created_at: string;
         };
         /**
+         * PreferenceUpsertRequest
+         * @description Body for ``PUT /preferences/{key}``.
+         *
+         *     A single ``value`` field rather than free-form JSON so the OpenAPI
+         *     schema (and thus the generated TS types) carries an explicit shape
+         *     the frontend can typecheck. The field is ``Any``-typed to allow
+         *     the existing structured-preferences contract (string today,
+         *     structured values later); validation against the recognised key
+         *     catalogue happens server-side via
+         *     :func:`core.preferences.validate_preference`.
+         */
+        PreferenceUpsertRequest: {
+            /**
+             * Value
+             * @description New value for the preference.
+             */
+            value: unknown;
+        };
+        /**
+         * PreferenceUpsertResponse
+         * @description Echo of the stored value after a ``PUT`` succeeds.
+         */
+        PreferenceUpsertResponse: {
+            /** Key */
+            key: string;
+            /** Value */
+            value: unknown;
+        };
+        /**
          * PreferencesResponse
          * @description Flat key-value map of the authenticated user's preferences.
          *
@@ -450,6 +509,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PreferencesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_preference_preferences__key__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description Preference key, e.g. 'preferred_name' or 'voice'. */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreferenceUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreferenceUpsertResponse"];
                 };
             };
             /** @description Validation Error */
