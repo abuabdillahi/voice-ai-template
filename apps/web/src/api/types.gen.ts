@@ -68,6 +68,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Preferences
+         * @description Return every stored preference for the authenticated user.
+         *
+         *     Thin adapter over :func:`core.preferences.list`. The user's bearer
+         *     token is forwarded to the Supabase client so RLS policies (defined
+         *     in ``0001_user_preferences.sql``) apply to the database query.
+         */
+        get: operations["list_preferences_preferences_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -131,6 +155,25 @@ export interface components {
             id: string;
             /** Email */
             email: string;
+        };
+        /**
+         * PreferencesResponse
+         * @description Flat key-value map of the authenticated user's preferences.
+         *
+         *     The shape is intentionally a single ``preferences`` field rather
+         *     than the response body itself being a free-form object — FastAPI
+         *     + OpenAPI handle nested objects more reliably than top-level
+         *     ``additionalProperties`` schemas, and the frontend reads
+         *     ``response.preferences`` either way.
+         */
+        PreferencesResponse: {
+            /**
+             * Preferences
+             * @description All stored preferences for the authenticated user.
+             */
+            preferences?: {
+                [key: string]: unknown;
+            };
         };
         /** ValidationError */
         ValidationError: {
@@ -227,6 +270,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LivekitTokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_preferences_preferences_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreferencesResponse"];
                 };
             };
             /** @description Validation Error */

@@ -50,13 +50,20 @@ TOOL_CALLS_TOPIC = "lk.tool-calls"
 
 # System prompt for the tracer slice. Issue 06 adds tool-availability
 # language so the realtime model knows it can call `get_current_time`
-# and `get_weather`. Subsequent issues move this into a versioned
-# prompt file.
+# and `get_weather`. Issue 07 extends the prompt with the structured-
+# preferences tools so the agent saves stated facts and consults them
+# before answering personal questions. Subsequent issues move this
+# into a versioned prompt file.
 SYSTEM_PROMPT = (
     "You are a helpful conversational assistant. "
     "Keep responses brief and natural for a spoken conversation. "
     "You have access to tools to look up the current time and the weather. "
-    "Use them when the user asks about time or weather."
+    "Use them when the user asks about time or weather. "
+    "When the user states a preference about themselves "
+    "(favorite color, preferred name, language, dietary needs, and so on), "
+    "call set_preference with a short snake_case key and the stated value. "
+    "Before answering personal questions, consider calling get_preference "
+    "to recall what they have told you previously."
 )
 
 
