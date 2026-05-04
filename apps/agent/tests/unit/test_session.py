@@ -83,6 +83,29 @@ def test_build_system_prompt_appends_preferred_name() -> None:
     assert "prefers to be called Sam" in prompt
 
 
+def test_build_system_prompt_inlines_stored_preferences() -> None:
+    """Stored preferences other than name/voice are listed as facts.
+
+    Without this preload the model has to call get_preference to
+    recall anything, which it does inconsistently — cross-session
+    recall feels broken.
+    """
+    prompt = build_system_prompt(
+        None,
+        {"favorite_color": "blue", "preferred_name": "Sam", "voice": "sage"},
+    )
+    assert "favorite color: blue" in prompt
+    # preferred_name and voice are excluded from the facts block —
+    # name is handled above; voice is session config, not a fact.
+    assert "preferred name: Sam" not in prompt
+    assert "voice: sage" not in prompt
+
+
+def test_build_system_prompt_omits_facts_block_when_no_extra_preferences() -> None:
+    prompt = build_system_prompt("Sam", {"preferred_name": "Sam", "voice": "sage"})
+    assert "Known facts" not in prompt
+
+
 def test_build_agent_uses_custom_instructions() -> None:
     agent = build_agent(instructions="custom prompt for the realtime model")
     assert agent.instructions == "custom prompt for the realtime model"

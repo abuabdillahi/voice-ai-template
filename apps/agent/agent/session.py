@@ -204,23 +204,29 @@ def _load_user_preferences(
     user: User,
     supabase_token: str | None,
     log: Any,
-) -> tuple[str | None, str | None]:
-    """Read ``preferred_name`` and ``voice`` for the session start.
+) -> tuple[str | None, str | None, dict[str, Any]]:
+    """Read all stored preferences for the session start.
 
-    Returns ``(preferred_name, voice)``; either may be ``None``. When
-    the access token is missing or the read fails, both come back
-    ``None`` and the session falls back to the unbranded prompt and
-    the default voice. Failure to read preferences must not crash the
-    voice loop — same degradation principle as the rest of the
-    session bootstrap.
+    Returns ``(preferred_name, voice, all_prefs)``. Any of the first
+    two may be ``None``; ``all_prefs`` is the full row map so the
+    system prompt can list every stored preference as a known fact.
+    Without this preload the model has to call ``get_preference`` to
+    recall anything other than name/voice — which it does
+    inconsistently, so cross-session recall feels broken.
+
+    When the access token is missing or the read fails, returns
+    ``(None, None, {})`` and the session falls back to the unbranded
+    prompt and the default voice. Failure to read preferences must
+    not crash the voice loop — same degradation principle as the rest
+    of the session bootstrap.
     """
     if supabase_token is None:
-        return (None, None)
+        return (None, None, {})
     try:
         rows = core_preferences.list(user, access_token=supabase_token)
     except Exception as exc:  # noqa: BLE001 — degrade rather than crash
         log.warning("agent.preferences.read_failed", error=str(exc))
-        return (None, None)
+        return (None, None, {})
     raw_name = rows.get(core_preferences.PREFERRED_NAME_KEY)
     raw_voice = rows.get(core_preferences.VOICE_KEY)
     name: str | None = None
@@ -229,20 +235,49 @@ def _load_user_preferences(
         name = raw_name.strip()
     if isinstance(raw_voice, str) and raw_voice in core_preferences.OPENAI_REALTIME_VOICES:
         voice = raw_voice
-    return (name, voice)
+    return (name, voice, dict(rows))
 
 
-def build_system_prompt(preferred_name: str | None) -> str:
+def build_system_prompt(
+    preferred_name: str | None,
+    preferences: dict[str, Any] | None = None,
+) -> str:
     """Return the agent's system prompt, optionally personalised.
 
-    When ``preferred_name`` is set the prompt is appended with a line
-    instructing the model to address the user by that name. Kept as a
-    pure function so tests can assert the wiring without spinning up a
-    LiveKit session.
+    Three layers stack onto :data:`SYSTEM_PROMPT`:
+
+    * ``preferred_name`` — instructs the model to address the user by
+      that name.
+    * ``preferences`` — every other stored preference is listed as a
+      known fact so the model can verbalise them directly without
+      having to call ``get_preference``. ``preferred_name`` and
+      ``voice`` are excluded (the former is already handled above; the
+      latter is a session config, not a fact about the user).
+
+    Pure function so tests can assert the wiring without spinning up
+    a LiveKit session.
     """
-    if not preferred_name:
-        return SYSTEM_PROMPT
-    return SYSTEM_PROMPT + f" The user prefers to be called {preferred_name}."
+    prompt = SYSTEM_PROMPT
+    if preferred_name:
+        prompt += f" The user prefers to be called {preferred_name}."
+
+    facts: list[str] = []
+    if preferences:
+        excluded = {core_preferences.PREFERRED_NAME_KEY, core_preferences.VOICE_KEY}
+        for key, value in sorted(preferences.items()):
+            if key in excluded:
+                continue
+            if value is None or (isinstance(value, str) and not value.strip()):
+                continue
+            facts.append(f"- {key.replace('_', ' ')}: {value}")
+    if facts:
+        prompt += (
+            "\n\nKnown facts about the user (from prior sessions). Use these "
+            "to answer personal questions directly without calling tools, but "
+            "still call set_preference to record any new preferences they "
+            "state:\n" + "\n".join(facts)
+        )
+    return prompt
 
 
 def _wire_tool_call_forwarding(
@@ -539,9 +574,9 @@ async def entrypoint(ctx: JobContext) -> None:
     # degrade to None silently when the token is missing or the read
     # fails; the voice loop must keep working before persistence is
     # wired end-to-end.
-    preferred_name, voice = _load_user_preferences(user, supabase_token, log)
+    preferred_name, voice, all_prefs = _load_user_preferences(user, supabase_token, log)
     session = build_session(settings, voice=voice)
-    agent = build_agent(deps, instructions=build_system_prompt(preferred_name))
+    agent = build_agent(deps, instructions=build_system_prompt(preferred_name, all_prefs))
 
     _wire_tool_call_forwarding(
         session,
