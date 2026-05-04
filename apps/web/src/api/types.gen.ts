@@ -92,6 +92,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memories/recent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Recent Memories
+         * @description Return the authenticated user's recent episodic memories.
+         *
+         *     Thin adapter over :func:`core.memory.list_recent`. The user's
+         *     bearer token is forwarded for symmetry with the preferences route;
+         *     mem0 itself does not consume the Supabase JWT today (it talks to
+         *     Postgres directly), but RLS policies on ``mem0_memories`` enforce
+         *     user isolation at the database level — see ``0003_mem0_memories.sql``.
+         */
+        get: operations["list_recent_memories_memories_recent_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations": {
         parameters: {
             query?: never;
@@ -278,6 +304,38 @@ export interface components {
             email: string;
         };
         /**
+         * MemoriesResponse
+         * @description Response payload for ``GET /memories/recent``.
+         */
+        MemoriesResponse: {
+            /**
+             * Memories
+             * @description The authenticated user's most recent memories, newest-first by mem0's ordering.
+             */
+            memories?: components["schemas"]["MemoryItem"][];
+        };
+        /**
+         * MemoryItem
+         * @description One recalled memory, projected for the wire.
+         *
+         *     Mirrors :class:`core.memory.Memory`. We expose ``id`` so a future
+         *     UI can attribute updates back to the same memory; ``score`` is
+         *     intentionally omitted from the listing endpoint because the
+         *     sidebar lists rather than ranks.
+         */
+        MemoryItem: {
+            /**
+             * Id
+             * @description Stable identifier mem0 assigns to the memory.
+             */
+            id: string;
+            /**
+             * Content
+             * @description The remembered fact, in natural language.
+             */
+            content: string;
+        };
+        /**
          * MessageItem
          * @description A single transcript turn for the detail view.
          */
@@ -450,6 +508,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PreferencesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recent_memories_memories_recent_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoriesResponse"];
                 };
             };
             /** @description Validation Error */

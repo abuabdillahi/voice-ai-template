@@ -13,6 +13,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from core import conversations, preferences
+from core import memory as core_memory
 from core.auth import User, get_current_user
 from core.config import Settings, get_settings
 from core.livekit import issue_token
@@ -151,6 +152,60 @@ def list_preferences(
     access_token = _bearer_token(authorization)
     rows = preferences.list(current_user, access_token=access_token)
     return PreferencesResponse(preferences=rows)
+
+
+# ---------------------------------------------------------------------------
+# Issue 08 — episodic memory routes.
+# ---------------------------------------------------------------------------
+
+
+class MemoryItem(BaseModel):
+    """One recalled memory, projected for the wire.
+
+    Mirrors :class:`core.memory.Memory`. We expose ``id`` so a future
+    UI can attribute updates back to the same memory; ``score`` is
+    intentionally omitted from the listing endpoint because the
+    sidebar lists rather than ranks.
+    """
+
+    id: str = Field(description="Stable identifier mem0 assigns to the memory.")
+    content: str = Field(description="The remembered fact, in natural language.")
+
+
+class MemoriesResponse(BaseModel):
+    """Response payload for ``GET /memories/recent``."""
+
+    memories: list[MemoryItem] = Field(
+        default_factory=list,
+        description=(
+            "The authenticated user's most recent memories, newest-first by mem0's ordering."
+        ),
+    )
+
+
+@router.get("/memories/recent", response_model=MemoriesResponse, tags=["memories"])
+def list_recent_memories(
+    current_user: Annotated[User, Depends(get_current_user)],
+    authorization: Annotated[str | None, Header()] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+) -> MemoriesResponse:
+    """Return the authenticated user's recent episodic memories.
+
+    Thin adapter over :func:`core.memory.list_recent`. The user's
+    bearer token is forwarded for symmetry with the preferences route;
+    mem0 itself does not consume the Supabase JWT today (it talks to
+    Postgres directly), but RLS policies on ``mem0_memories`` enforce
+    user isolation at the database level — see ``0003_mem0_memories.sql``.
+    """
+    access_token = _bearer_token(authorization)
+    rows = core_memory.list_recent(
+        current_user,
+        limit=limit,
+        supabase_token=access_token,
+    )
+    return MemoriesResponse(
+        memories=[MemoryItem(id=m.id, content=m.content) for m in rows],
+    )
 
 
 # ---------------------------------------------------------------------------

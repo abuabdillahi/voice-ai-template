@@ -92,6 +92,14 @@ ignore_missing_imports = true
 module = ["api.*", "agent.*", "core.*"]
 ignore_missing_imports = true
 
+# `mem0ai` (the Python SDK behind `core.memory`) does not ship a
+# py.typed marker. We pin to the structural `MemoryClientProtocol` in
+# `core.memory` so the un-stubbed import here is just the lazy
+# `from mem0 import Memory` at construction time.
+[[tool.mypy.overrides]]
+module = ["mem0", "mem0.*"]
+ignore_missing_imports = true
+
 # ----------------------------------------------------------------------------
 # Pytest
 # ----------------------------------------------------------------------------
