@@ -156,31 +156,23 @@ def test_tool_call_persistence_helper_swallows_errors(
 def test_resolve_supabase_token_returns_none_for_empty_metadata() -> None:
     """Without participant metadata, the helper returns None."""
 
-    class _Claims:
+    class _Participant:
         identity = "11111111-1111-1111-1111-111111111111"
         name = "alice@example.com"
         metadata = ""
 
-    class _Ctx:
-        def token_claims(self) -> Any:
-            return _Claims()
-
-    assert _resolve_supabase_token(_Ctx()) is None
+    assert _resolve_supabase_token(_Participant()) is None
 
 
 def test_resolve_supabase_token_extracts_value_from_json_metadata() -> None:
     import json as _json
 
-    class _Claims:
+    class _Participant:
         identity = "11111111-1111-1111-1111-111111111111"
         name = "alice@example.com"
         metadata = _json.dumps({"supabase_access_token": "user-jwt"})
 
-    class _Ctx:
-        def token_claims(self) -> Any:
-            return _Claims()
-
-    assert _resolve_supabase_token(_Ctx()) == "user-jwt"
+    assert _resolve_supabase_token(_Participant()) == "user-jwt"
 
 
 def test_token_roundtrip_from_issue_token_to_resolve_supabase_token() -> None:
@@ -225,15 +217,13 @@ def test_token_roundtrip_from_issue_token_to_resolve_supabase_token() -> None:
         options={"verify_aud": False},
     )
 
-    class _Claims:
+    class _Participant:
         metadata = claims_dict["metadata"]
 
-    class _Ctx:
-        def token_claims(self) -> Any:
-            return _Claims()
-
-    resolved = _resolve_supabase_token(_Ctx())
+    resolved = _resolve_supabase_token(_Participant())
     assert resolved == "downstream-supabase-jwt"
 
     # Sanity: the metadata blob is exactly the shape both sides agree on.
-    assert _json.loads(_Claims.metadata) == {"supabase_access_token": "downstream-supabase-jwt"}
+    assert _json.loads(_Participant.metadata) == {
+        "supabase_access_token": "downstream-supabase-jwt"
+    }

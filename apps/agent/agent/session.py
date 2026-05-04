@@ -99,18 +99,21 @@ class _SessionDeps:
     log: Any  # structlog BoundLogger; kept loose to avoid a hard dep here.
 
 
-def _resolve_user_from_ctx(ctx: JobContext) -> User:
-    """Reconstruct the :class:`User` from the LiveKit token claims.
+def _resolve_user_from_participant(participant: Any) -> User:
+    """Reconstruct the :class:`User` from the connecting participant.
 
     The API minted the token with the Supabase user id as the
     participant identity (see :mod:`core.livekit`). The `name` field
     carries the email. We deliberately do not re-verify the JWT here:
     LiveKit has already verified it on join, and the worker's job is
     to act on a participant that has already been admitted.
+
+    Note: the agent's own ``ctx.token_claims()`` returns the agent's
+    auto-generated identity (e.g. ``agent-AJ_…``), which is not a UUID
+    — that's why we read from the remote participant instead.
     """
-    claims = ctx.token_claims()
-    identity = claims.identity
-    name = claims.name or ""
+    identity = participant.identity
+    name = getattr(participant, "name", "") or ""
     return User(id=UUID(identity), email=name)
 
 
@@ -322,7 +325,7 @@ def _wire_tool_call_forwarding(
 # down a live conversation.
 
 
-def _resolve_supabase_token(ctx: JobContext) -> str | None:
+def _resolve_supabase_token(participant: Any) -> str | None:
     """Recover the user's Supabase JWT for token-scoped persistence.
 
     LiveKit lets a participant attach metadata to their join token. The
@@ -331,17 +334,17 @@ def _resolve_supabase_token(ctx: JobContext) -> str | None:
     it to RLS-scoped database calls. Wire shape:
     ``{"supabase_access_token": "<jwt>"}`` JSON-encoded.
 
+    Reads from the remote participant — the agent's own
+    ``ctx.token_claims()`` carries the agent's empty metadata, not the
+    user's.
+
     The graceful-degrade fallback (return ``None``) is kept as defence
     in depth — older clients, manual ``livekit dispatch`` invocations,
     and tests that mint tokens without metadata still produce a
     workable session, just one where the persistence hooks log a
     warning and skip the write rather than tearing down the call.
     """
-    try:
-        claims = ctx.token_claims()
-    except Exception:  # noqa: BLE001 — token shape varies across versions
-        return None
-    metadata = getattr(claims, "metadata", None)
+    metadata = getattr(participant, "metadata", None)
     if not metadata:
         return None
     try:
@@ -483,7 +486,12 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await ctx.connect()
 
-    user = _resolve_user_from_ctx(ctx)
+    # Wait for the user to join. The agent's own ctx claims carry an
+    # auto-generated identity ("agent-AJ_…"), so we resolve the user
+    # from the remote participant the dispatch was triggered for.
+    participant = await ctx.wait_for_participant()
+
+    user = _resolve_user_from_participant(participant)
     deps = _SessionDeps(user=user, log=log.bind(user_id=str(user.id)))
 
     # ------------------------------------------------------------------
@@ -507,7 +515,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # loop must keep working even before transcript storage is fully
     # configured.
     # ------------------------------------------------------------------
-    supabase_token = _resolve_supabase_token(ctx)
+    supabase_token = _resolve_supabase_token(participant)
     conv_id: UUID | None = None
     if supabase_token is not None:
         try:
