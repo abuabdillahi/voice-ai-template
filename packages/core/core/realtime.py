@@ -18,6 +18,8 @@ The factory returns the abstract `RealtimeModel` base class from
 
 from __future__ import annotations
 
+from typing import Any
+
 from livekit.agents.llm import RealtimeModel
 from livekit.plugins import openai as openai_plugin
 
@@ -28,19 +30,32 @@ from core.config import Settings, get_settings
 _DEFAULT_OPENAI_REALTIME_MODEL = "gpt-realtime"
 
 
-def create_realtime_model(settings: Settings | None = None) -> RealtimeModel:
+def create_realtime_model(
+    settings: Settings | None = None,
+    *,
+    voice: str | None = None,
+) -> RealtimeModel:
     """Build the realtime model used by the agent worker.
 
     Returns an OpenAI Realtime model wired with the API key from
     settings. The function takes optional `settings` so tests can
     inject a fake; production callers pass nothing and pick up the
     process-wide singleton.
+
+    ``voice`` selects the Realtime model's spoken voice. Issue 10's
+    settings page stores this per-user under the ``voice`` preference
+    key; the agent worker reads it at session start and threads it
+    through here. When ``None``, the underlying plugin's default voice
+    is used.
     """
     settings = settings or get_settings()
-    return openai_plugin.realtime.RealtimeModel(
-        model=_DEFAULT_OPENAI_REALTIME_MODEL,
-        api_key=settings.openai_api_key,
-    )
+    kwargs: dict[str, Any] = {
+        "model": _DEFAULT_OPENAI_REALTIME_MODEL,
+        "api_key": settings.openai_api_key,
+    }
+    if voice is not None:
+        kwargs["voice"] = voice
+    return openai_plugin.realtime.RealtimeModel(**kwargs)
 
 
 __all__ = ["create_realtime_model"]

@@ -25,6 +25,7 @@ from agent.session import (
     SYSTEM_PROMPT,
     build_agent,
     build_session,
+    build_system_prompt,
     worker_options,
 )
 from core.config import Settings
@@ -64,3 +65,33 @@ def test_worker_options_pulls_credentials_from_settings(settings: Settings) -> N
     from agent.session import entrypoint
 
     assert opts.entrypoint_fnc is entrypoint
+
+
+# ---------------------------------------------------------------------------
+# Issue 10 — preference-driven personalisation
+# ---------------------------------------------------------------------------
+
+
+def test_build_system_prompt_returns_default_without_name() -> None:
+    assert build_system_prompt(None) == SYSTEM_PROMPT
+    assert build_system_prompt("") == SYSTEM_PROMPT
+
+
+def test_build_system_prompt_appends_preferred_name() -> None:
+    prompt = build_system_prompt("Sam")
+    assert prompt.startswith(SYSTEM_PROMPT)
+    assert "prefers to be called Sam" in prompt
+
+
+def test_build_agent_uses_custom_instructions() -> None:
+    agent = build_agent(instructions="custom prompt for the realtime model")
+    assert agent.instructions == "custom prompt for the realtime model"
+
+
+def test_build_session_passes_voice_to_factory(settings: Settings) -> None:
+    with patch("agent.session.create_realtime_model") as factory:
+        factory.return_value = build_session(settings).llm  # any RealtimeModel
+        build_session(settings, voice="sage")
+        # The most-recent call should be ours; assert the kwarg shape.
+        kwargs = factory.call_args.kwargs
+        assert kwargs.get("voice") == "sage"

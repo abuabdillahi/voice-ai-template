@@ -157,3 +157,45 @@ def test_list_returns_empty_dict_when_no_rows(monkeypatch: pytest.MonkeyPatch) -
     client = _FakeClient(data=[])
     _patch_client_factory(monkeypatch, client)
     assert preferences.list(_USER, access_token=_TOKEN) == {}
+
+
+# ---------------------------------------------------------------------------
+# Issue 10 — validate_preference
+# ---------------------------------------------------------------------------
+
+
+def test_validate_preferred_name_strips_and_returns() -> None:
+    assert preferences.validate_preference("preferred_name", "  Sam  ") == "Sam"
+
+
+def test_validate_preferred_name_rejects_empty() -> None:
+    with pytest.raises(preferences.PreferenceValidationError):
+        preferences.validate_preference("preferred_name", "")
+    with pytest.raises(preferences.PreferenceValidationError):
+        preferences.validate_preference("preferred_name", "   ")
+
+
+def test_validate_preferred_name_rejects_non_string() -> None:
+    with pytest.raises(preferences.PreferenceValidationError):
+        preferences.validate_preference("preferred_name", 42)
+
+
+def test_validate_preferred_name_caps_length() -> None:
+    long = "x" * 81
+    with pytest.raises(preferences.PreferenceValidationError):
+        preferences.validate_preference("preferred_name", long)
+
+
+def test_validate_voice_accepts_listed_value() -> None:
+    for voice in preferences.OPENAI_REALTIME_VOICES:
+        assert preferences.validate_preference("voice", voice) == voice
+
+
+def test_validate_voice_rejects_unlisted_value() -> None:
+    with pytest.raises(preferences.PreferenceValidationError):
+        preferences.validate_preference("voice", "fake-voice")
+
+
+def test_validate_rejects_unknown_key() -> None:
+    with pytest.raises(preferences.PreferenceValidationError):
+        preferences.validate_preference("favorite_color", "blue")

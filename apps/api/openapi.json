@@ -194,6 +194,77 @@
         }
       }
     },
+    "/preferences/{key}": {
+      "put": {
+        "tags": [
+          "preferences"
+        ],
+        "summary": "Upsert Preference",
+        "description": "Upsert a single preference for the authenticated user.\n\nValidated against :func:`core.preferences.validate_preference`,\nwhich today only accepts the settings-page keys\n(:data:`core.preferences.SETTINGS_KEYS`). The free-form\n``set_preference`` agent tool remains available for keys outside\nthat catalogue \u2014 the settings page is intentionally narrower than\nthe agent's surface.\n\nReturns 400 with a structured error body on validation failure,\n401 without authentication, 200 on success.",
+        "operationId": "upsert_preference_preferences__key__put",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Preference key, e.g. 'preferred_name' or 'voice'.",
+              "title": "Key"
+            },
+            "description": "Preference key, e.g. 'preferred_name' or 'voice'."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreferenceUpsertRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferenceUpsertResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/memories/recent": {
       "get": {
         "tags": [
@@ -707,6 +778,38 @@
         ],
         "title": "MessageItem",
         "description": "A single transcript turn for the detail view."
+      },
+      "PreferenceUpsertRequest": {
+        "properties": {
+          "value": {
+            "title": "Value",
+            "description": "New value for the preference."
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "PreferenceUpsertRequest",
+        "description": "Body for ``PUT /preferences/{key}``.\n\nA single ``value`` field rather than free-form JSON so the OpenAPI\nschema (and thus the generated TS types) carries an explicit shape\nthe frontend can typecheck. The field is ``Any``-typed to allow\nthe existing structured-preferences contract (string today,\nstructured values later); validation against the recognised key\ncatalogue happens server-side via\n:func:`core.preferences.validate_preference`."
+      },
+      "PreferenceUpsertResponse": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "PreferenceUpsertResponse",
+        "description": "Echo of the stored value after a ``PUT`` succeeds."
       },
       "PreferencesResponse": {
         "properties": {

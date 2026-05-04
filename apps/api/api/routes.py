@@ -154,6 +154,63 @@ def list_preferences(
     return PreferencesResponse(preferences=rows)
 
 
+class PreferenceUpsertRequest(BaseModel):
+    """Body for ``PUT /preferences/{key}``.
+
+    A single ``value`` field rather than free-form JSON so the OpenAPI
+    schema (and thus the generated TS types) carries an explicit shape
+    the frontend can typecheck. The field is ``Any``-typed to allow
+    the existing structured-preferences contract (string today,
+    structured values later); validation against the recognised key
+    catalogue happens server-side via
+    :func:`core.preferences.validate_preference`.
+    """
+
+    value: Any = Field(description="New value for the preference.")
+
+
+class PreferenceUpsertResponse(BaseModel):
+    """Echo of the stored value after a ``PUT`` succeeds."""
+
+    key: str
+    value: Any
+
+
+@router.put(
+    "/preferences/{key}",
+    response_model=PreferenceUpsertResponse,
+    tags=["preferences"],
+)
+def upsert_preference(
+    current_user: Annotated[User, Depends(get_current_user)],
+    key: Annotated[str, Path(description="Preference key, e.g. 'preferred_name' or 'voice'.")],
+    payload: PreferenceUpsertRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> PreferenceUpsertResponse:
+    """Upsert a single preference for the authenticated user.
+
+    Validated against :func:`core.preferences.validate_preference`,
+    which today only accepts the settings-page keys
+    (:data:`core.preferences.SETTINGS_KEYS`). The free-form
+    ``set_preference`` agent tool remains available for keys outside
+    that catalogue — the settings page is intentionally narrower than
+    the agent's surface.
+
+    Returns 400 with a structured error body on validation failure,
+    401 without authentication, 200 on success.
+    """
+    access_token = _bearer_token(authorization)
+    try:
+        normalised = preferences.validate_preference(key, payload.value)
+    except preferences.PreferenceValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "invalid_preference", "message": str(exc)},
+        ) from exc
+    preferences.set(current_user, key, normalised, access_token=access_token)
+    return PreferenceUpsertResponse(key=key, value=normalised)
+
+
 # ---------------------------------------------------------------------------
 # Issue 08 — episodic memory routes.
 # ---------------------------------------------------------------------------
