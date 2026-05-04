@@ -165,7 +165,7 @@ def test_resolve_supabase_token_returns_none_for_empty_metadata() -> None:
         def token_claims(self) -> Any:
             return _Claims()
 
-    assert _resolve_supabase_token(_Ctx()) is None  # type: ignore[arg-type]
+    assert _resolve_supabase_token(_Ctx()) is None
 
 
 def test_resolve_supabase_token_extracts_value_from_json_metadata() -> None:
@@ -180,7 +180,7 @@ def test_resolve_supabase_token_extracts_value_from_json_metadata() -> None:
         def token_claims(self) -> Any:
             return _Claims()
 
-    assert _resolve_supabase_token(_Ctx()) == "user-jwt"  # type: ignore[arg-type]
+    assert _resolve_supabase_token(_Ctx()) == "user-jwt"
 
 
 def test_token_roundtrip_from_issue_token_to_resolve_supabase_token() -> None:
@@ -232,7 +232,7 @@ def test_token_roundtrip_from_issue_token_to_resolve_supabase_token() -> None:
         def token_claims(self) -> Any:
             return _Claims()
 
-    resolved = _resolve_supabase_token(_Ctx())  # type: ignore[arg-type]
+    resolved = _resolve_supabase_token(_Ctx())
     assert resolved == "downstream-supabase-jwt"
 
     # Sanity: the metadata blob is exactly the shape both sides agree on.
