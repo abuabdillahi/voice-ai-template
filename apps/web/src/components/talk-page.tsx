@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { ChevronRight, Mic, MicOff, PhoneCall, PhoneOff } from 'lucide-react';
-import { Room, RoomEvent, ConnectionState } from 'livekit-client';
+import { Room, RoomEvent, ConnectionState, Track, type RemoteTrack } from 'livekit-client';
 
 import { apiFetch } from '@/lib/api';
 import { useLivekitTranscript, type TranscriptEntry } from '@/lib/livekit-transcript';
@@ -64,6 +64,20 @@ export function TalkPage() {
         else if (state === ConnectionState.Connecting) setStatus('connecting');
         else if (state === ConnectionState.Reconnecting) setStatus('connecting');
         else if (state === ConnectionState.Disconnected) setStatus('disconnected');
+      });
+      // Attach every remote audio track to a hidden <audio> element so
+      // the browser actually plays the agent's voice. LiveKit subscribes
+      // tracks automatically, but it does not auto-play — without this
+      // hook the assistant's transcript appears but no sound comes out.
+      lkRoom.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
+        if (track.kind !== Track.Kind.Audio) return;
+        const element = track.attach();
+        element.style.display = 'none';
+        document.body.appendChild(element);
+      });
+      lkRoom.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+        if (track.kind !== Track.Kind.Audio) return;
+        track.detach().forEach((el) => el.remove());
       });
       await lkRoom.connect(info.url, info.token);
       return { room: lkRoom, info };

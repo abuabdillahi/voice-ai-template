@@ -60,15 +60,35 @@ export function useLivekitTranscript(room: Room | null): TranscriptEntry[] {
       return;
     }
 
+    const DEDUP_WINDOW_MS = 5_000;
+
     const upsert = (entry: TranscriptEntry): void => {
       setEntries((prev) => {
-        const existing = prev.findIndex((e) => e.id === entry.id);
-        if (existing === -1) return [...prev, entry];
-        const copy = prev.slice();
-        // Preserve the original createdAt so reorders don't happen
-        // when later chunks of the same utterance arrive.
-        copy[existing] = { ...entry, createdAt: prev[existing].createdAt };
-        return copy;
+        // Primary key: stream id. Same id ⇒ same utterance, later
+        // chunk overwrites earlier (the live-typing case).
+        const byId = prev.findIndex((e) => e.id === entry.id);
+        if (byId !== -1) {
+          const copy = prev.slice();
+          copy[byId] = { ...entry, createdAt: prev[byId].createdAt };
+          return copy;
+        }
+        // Secondary key: same role + same text within a short window.
+        // The realtime model emits the user's transcription twice for
+        // each utterance (server VAD + realtime model echo) under
+        // different stream ids; without this collapse, every user line
+        // shows up duplicated. Tool-call entries are exempt because
+        // their `id` is already unique per dispatch.
+        if (entry.role !== 'tool-call') {
+          const trimmed = entry.text.trim();
+          const recent = prev.findIndex(
+            (e) =>
+              e.role === entry.role &&
+              e.text.trim() === trimmed &&
+              entry.createdAt - e.createdAt < DEDUP_WINDOW_MS,
+          );
+          if (recent !== -1) return prev;
+        }
+        return [...prev, entry];
       });
     };
 
