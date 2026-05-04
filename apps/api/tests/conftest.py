@@ -29,8 +29,8 @@ def settings() -> Iterator[Settings]:
     get_settings.cache_clear()
     s = Settings(
         supabase_url="https://test.supabase.co",
-        supabase_anon_key="test-anon",
-        supabase_jwt_secret="test-secret",
+        supabase_publishable_key="test-publishable",
+        supabase_jwks_url="https://test.supabase.co/auth/v1/.well-known/jwks.json",
         livekit_url="wss://test.livekit.cloud",
         livekit_api_key="lk-test-key",
         livekit_api_secret="lk-test-secret",

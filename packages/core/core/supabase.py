@@ -40,7 +40,7 @@ class SupabaseClientProtocol(Protocol):
 def _build_user_client(
     *,
     url: str,
-    anon_key: str,
+    publishable_key: str,
     access_token: str,
 ) -> Client:
     """Construct a Supabase client whose REST calls carry ``access_token``.
@@ -49,7 +49,7 @@ def _build_user_client(
     a fake client without dragging in the network-dependent
     :func:`supabase.create_client`.
     """
-    client = create_client(url, anon_key)
+    client = create_client(url, publishable_key)
     # PostgREST inspects the Authorization header to determine the
     # database role and `auth.uid()`. Setting the session here propagates
     # the user's JWT into every subsequent `.table(...)` call on this
@@ -78,7 +78,7 @@ def get_user_client(
     settings = settings or get_settings()
     return _build_user_client(
         url=settings.supabase_url,
-        anon_key=settings.supabase_anon_key,
+        publishable_key=settings.supabase_publishable_key,
         access_token=access_token,
     )
 
@@ -90,7 +90,7 @@ def get_anon_client(*, settings: Settings | None = None) -> Client:
     user-scoped on this client, which is the correct default.
     """
     settings = settings or get_settings()
-    return create_client(settings.supabase_url, settings.supabase_anon_key)
+    return create_client(settings.supabase_url, settings.supabase_publishable_key)
 
 
 __all__ = [

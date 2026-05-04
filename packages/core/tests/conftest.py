@@ -7,8 +7,6 @@ from collections.abc import Iterator
 import pytest
 from core.config import Settings, get_settings
 
-_TEST_JWT_SECRET = "test-secret-do-not-use-in-production"
-
 
 @pytest.fixture
 def settings() -> Iterator[Settings]:
@@ -21,8 +19,8 @@ def settings() -> Iterator[Settings]:
     get_settings.cache_clear()
     yield Settings(
         supabase_url="https://test.supabase.co",
-        supabase_anon_key="test-anon-key",
-        supabase_jwt_secret=_TEST_JWT_SECRET,
+        supabase_publishable_key="test-publishable-key",
+        supabase_jwks_url="https://test.supabase.co/auth/v1/.well-known/jwks.json",
         livekit_url="wss://test.livekit.cloud",
         livekit_api_key="lk-test-key",
         livekit_api_secret="lk-test-secret",

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,13 +30,35 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
     # --- Supabase ---
     supabase_url: str = Field(..., description="Supabase project URL.")
-    supabase_anon_key: str = Field(..., description="Supabase anon/public API key.")
-    supabase_jwt_secret: str = Field(
-        ..., description="HS256 secret used by Supabase to sign user JWTs."
+    # The publishable (formerly "anon") key identifies the project to
+    # PostgREST. Reads the new env var first; falls back to
+    # SUPABASE_ANON_KEY for `.env` files cloned before the 2026 rename.
+    supabase_publishable_key: str = Field(
+        ...,
+        description="Supabase publishable (formerly anon) API key.",
+        validation_alias=AliasChoices("supabase_publishable_key", "supabase_anon_key"),
+    )
+    # Optional override for the JWKS endpoint. Self-hosted Supabase
+    # deployments at non-standard paths can set this; otherwise the
+    # verifier derives it from `supabase_url`.
+    supabase_jwks_url: str | None = Field(
+        default=None,
+        description=(
+            "Override URL for the Supabase JWKS endpoint. When unset, "
+            "defaults to {supabase_url}/auth/v1/.well-known/jwks.json."
+        ),
+    )
+    # Legacy HS256 secret. Retained as optional for backward compatibility
+    # with `.env` files cloned before the JWKS migration; the verifier no
+    # longer consults it.
+    supabase_jwt_secret: str | None = Field(
+        default=None,
+        description="Deprecated: legacy HS256 JWT secret. No longer used.",
     )
 
     # --- LiveKit (realtime media plane) ---

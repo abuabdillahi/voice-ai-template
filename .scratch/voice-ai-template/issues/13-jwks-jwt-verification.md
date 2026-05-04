@@ -86,3 +86,21 @@ None — issues 04 and 12 are merged. Can start immediately.
 **2026-05-04 — Issue created.** Prompted by the Supabase dashboard's nudge to migrate from the legacy JWT secret to JWT Signing Keys, plus the related shift from `anon`/`service_role` JWT-based API keys to opaque `publishable`/`secret` keys. The legacy path still works (verification only; can no longer be regenerated), but the template should align with the recommended Supabase configuration so anyone cloning it lands on the supported path. Scoped to verification + publishable key only; the `service_role` → `secret` migration is deferred since the template doesn't currently use service-role access (everything goes through user JWTs and RLS, which is correct).
 
 **2026-05-04 — Promoted to `ready-for-agent`.** Maintainer authorized via "yes draft and triage it." Issue body above is treated as the agent brief; no separate brief authored (same pattern as issues 01–12). Dependencies (issues 04, 12) are merged. Unblocked.
+
+**2026-05-04 — Implemented.** All AC items met:
+
+- New `core/jwks.py` module: `get_jwks(url, ttl=600)` fetches via httpx with 5s timeout and process-global cache; `invalidate_jwks()` drops the cache for forced refresh.
+- `core.auth.verify_token` rewritten to ES256/RS256 verification against the JWKS document. On `JWTError` it invalidates the cache, refetches once, and retries — absorbs Supabase key rotations transparently.
+- `core.config.Settings`:
+  - `supabase_publishable_key` (required) reads `SUPABASE_PUBLISHABLE_KEY` first, falls back to `SUPABASE_ANON_KEY` via `AliasChoices`. `populate_by_name=True` enabled so direct kwarg construction works.
+  - `supabase_jwks_url` (optional) overrides the derived JWKS path for self-hosted Supabase deployments.
+  - `supabase_jwt_secret` (optional, deprecated) retained so old `.env` files don't fail validation; verifier no longer reads it.
+- All `Settings()` construction sites updated (`packages/core/tests/conftest.py`, `apps/api/tests/conftest.py`, `apps/agent/tests/conftest.py`, `apps/agent/tests/integration/test_session_persistence.py`).
+- `core.supabase` parameters renamed (`anon_key` → `publishable_key`).
+- Frontend: `apps/web/src/lib/supabase.ts` reads `VITE_SUPABASE_PUBLISHABLE_KEY` first, falls back to `VITE_SUPABASE_ANON_KEY`. `vitest.setup.ts` and the boot-time error message updated.
+- Tests rewritten with Approach A (preferred): in-test EC P-256 keypair, `httpx.MockTransport`-style monkey-patch on `get_jwks`, real `jwt.decode` path exercised. Added a kid-rotation test that asserts the cache invalidation + refetch works. Added a JWKS-cache test that asserts TTL-window reuse.
+- Documentation: `.env.example`, `turbo.json` `globalPassThroughEnv` updated. README "Auth setup" rewritten to drop `SUPABASE_JWT_SECRET` and document the publishable-key path with a note that the legacy `SUPABASE_ANON_KEY` alias still works.
+
+`service_role` → `secret` migration explicitly out of scope (we don't use service-role access anywhere).
+
+Verified: `pnpm exec turbo run lint typecheck test --force` 12/12 across all packages; `pnpm exec prettier --check .` clean.

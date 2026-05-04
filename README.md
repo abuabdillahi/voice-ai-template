@@ -120,23 +120,23 @@ The template uses Supabase for auth, Postgres, and (later) pgvector. Two flavour
 ### Option A — Supabase Cloud (zero-setup, free tier)
 
 1. Create a project at <https://supabase.com>.
-2. From **Project Settings → API** copy the **Project URL**, **anon public key**, and **JWT Secret** (under "JWT Settings"). Paste them into `.env`:
+2. From **Project Settings → API** copy the **Project URL** and the **publishable key**. Paste them into `.env`:
 
    ```
    SUPABASE_URL=https://<ref>.supabase.co
-   SUPABASE_ANON_KEY=<anon-public-key>
-   SUPABASE_JWT_SECRET=<jwt-secret>
+   SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 
    VITE_SUPABASE_URL=https://<ref>.supabase.co
-   VITE_SUPABASE_ANON_KEY=<anon-public-key>
+   VITE_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
    ```
 
+   JWT verification uses the project's JWKS endpoint at `{SUPABASE_URL}/auth/v1/.well-known/jwks.json` — no `JWT_SECRET` required. (The legacy `SUPABASE_ANON_KEY` env var is still accepted as an alias for the publishable key, so `.env` files cloned before the 2026 rename keep working.)
 3. (Optional) In **Authentication → Providers → Email** disable "Confirm email" if you want sign-ups to work without an SMTP server.
 
 ### Option B — Supabase local (self-hosted via the CLI)
 
 1. Install the [Supabase CLI](https://supabase.com/docs/guides/cli).
-2. From the repo root run `supabase start`. The CLI prints the local URL, anon key, and JWT secret — paste them into `.env` and the matching `VITE_SUPABASE_*` keys.
+2. From the repo root run `supabase start`. The CLI prints the local URL and publishable key — paste them into `.env` and the matching `VITE_SUPABASE_*` mirrors. Set `SUPABASE_JWKS_URL` to the local Supabase Auth JWKS URL the CLI prints if it differs from the standard `/auth/v1/.well-known/jwks.json` path.
 3. Apply the bundled migrations: `supabase db reset`.
 
 ## Voice loop setup

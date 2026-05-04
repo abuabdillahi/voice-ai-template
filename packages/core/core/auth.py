@@ -1,13 +1,20 @@
 """Supabase JWT verification and the FastAPI current-user dependency.
 
 The `core.auth` module is the only place in the codebase that knows how
-Supabase tokens are validated. API route handlers and (later) the agent
-worker depend on `get_current_user` and never look at the JWT directly.
+Supabase tokens are validated. API route handlers and the agent worker
+depend on `get_current_user` and never look at the JWT directly.
 
-Supabase issues HS256 JWTs signed with the project's JWT secret. The
-secret is loaded via :mod:`core.config`. Validation checks the signature,
-expiry, and the `aud` claim, then extracts the user id (`sub`) and
-`email` claim into a typed :class:`User`.
+Supabase signs access tokens with asymmetric JWT Signing Keys — ES256 by
+default, RS256 accepted for forward compatibility. The verifier fetches
+the public keys via the project's JWKS endpoint
+(``{SUPABASE_URL}/auth/v1/.well-known/jwks.json``), caches them, and
+re-fetches when a token references an unknown ``kid`` (key rotation) or
+when the cache TTL expires.
+
+The legacy HS256 shared-secret path was removed in issue 13. The
+``SUPABASE_JWT_SECRET`` env var is retained as optional for backward
+compat with `.env` files cloned before the migration but is no longer
+consulted.
 """
 
 from __future__ import annotations
@@ -16,16 +23,16 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 from uuid import UUID
 
+import httpx
 from fastapi import Depends, Header, HTTPException, status
 from jose import JWTError, jwt
 
 from core.config import Settings, get_settings
+from core.jwks import get_jwks, invalidate_jwks
 
-# Supabase signs all access tokens with HS256 by default. We pin the
-# algorithm rather than accepting whatever the token header asks for —
-# accepting "none" or RS256 from a token that was issued under HS256
-# would be a classic algorithm-confusion vulnerability.
-_ALGORITHM = "HS256"
+# Algorithms the verifier will accept. Pin to asymmetric only — accepting
+# HS256 alongside ES256 would re-introduce algorithm-confusion risk.
+_ALGORITHMS = ["ES256", "RS256"]
 # Supabase's default access-token audience.
 _AUDIENCE = "authenticated"
 
@@ -47,24 +54,53 @@ class AuthError(Exception):
     """Raised by :func:`verify_token` when a token cannot be trusted."""
 
 
+def _jwks_url(settings: Settings) -> str:
+    """Resolve the JWKS endpoint, honouring the optional override."""
+    if settings.supabase_jwks_url:
+        return settings.supabase_jwks_url
+    return f"{settings.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+
+
+def _decode(token: str, jwks: dict[str, Any]) -> dict[str, Any]:
+    return jwt.decode(
+        token,
+        jwks,
+        algorithms=_ALGORITHMS,
+        audience=_AUDIENCE,
+        options={"require": ["exp", "sub"]},
+    )
+
+
 def verify_token(token: str, *, settings: Settings | None = None) -> User:
     """Validate a Supabase JWT and return the :class:`User` it identifies.
 
     Raises :class:`AuthError` on any failure (bad signature, expired
     token, unexpected algorithm, missing claims). Callers translate that
     to an HTTP 401 — see :func:`get_current_user`.
+
+    Implements one transparent retry on JWKS lookup failure: if a token's
+    ``kid`` does not match any cached public key, the cache is dropped and
+    re-fetched once before failing — this absorbs Supabase key rotations
+    without operator intervention.
     """
     settings = settings or get_settings()
+    url = _jwks_url(settings)
+
     try:
-        claims: dict[str, Any] = jwt.decode(
-            token,
-            settings.supabase_jwt_secret,
-            algorithms=[_ALGORITHM],
-            audience=_AUDIENCE,
-            options={"require": ["exp", "sub"]},
-        )
-    except JWTError as exc:
-        raise AuthError(f"invalid token: {exc}") from exc
+        jwks = get_jwks(url)
+    except httpx.HTTPError as exc:
+        raise AuthError(f"unable to fetch JWKS: {exc}") from exc
+
+    try:
+        claims: dict[str, Any] = _decode(token, jwks)
+    except JWTError:
+        # Could be a kid miss after rotation — refresh once and retry.
+        invalidate_jwks()
+        try:
+            jwks = get_jwks(url)
+            claims = _decode(token, jwks)
+        except (JWTError, httpx.HTTPError) as exc:
+            raise AuthError(f"invalid token: {exc}") from exc
 
     sub = claims.get("sub")
     email = claims.get("email")
