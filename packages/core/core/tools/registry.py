@@ -49,10 +49,18 @@ class ToolContext:
     participant identity at session start) plus a structlog logger
     pre-bound with ``tool_name`` so every line a handler emits is
     correlated to the specific tool invocation.
+
+    ``supabase_access_token`` is the user's Supabase JWT, propagated
+    through to RLS-scoped database calls (see :mod:`core.preferences`).
+    Optional because not every tool touches the database — and because
+    the session-bootstrap path that supplies it is wired up
+    incrementally; tools that need it must check and degrade gracefully
+    when it is absent.
     """
 
     user: User
     log: BoundLogger
+    supabase_access_token: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,7 +289,11 @@ async def dispatch(
         return {"error": f"unknown tool {name!r}"}
 
     bound_log = ctx.log.bind(tool_name=name)
-    handler_ctx = ToolContext(user=ctx.user, log=bound_log)
+    handler_ctx = ToolContext(
+        user=ctx.user,
+        log=bound_log,
+        supabase_access_token=ctx.supabase_access_token,
+    )
 
     bound_log.info("tool.dispatch.start", args=args)
     try:

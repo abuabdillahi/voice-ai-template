@@ -143,6 +143,56 @@
           }
         }
       }
+    },
+    "/preferences": {
+      "get": {
+        "tags": [
+          "preferences"
+        ],
+        "summary": "List Preferences",
+        "description": "Return every stored preference for the authenticated user.\n\nThin adapter over :func:`core.preferences.list`. The user's bearer\ntoken is forwarded to the Supabase client so RLS policies (defined\nin ``0001_user_preferences.sql``) apply to the database query.",
+        "operationId": "list_preferences_preferences_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -238,6 +288,19 @@
         ],
         "title": "MeResponse",
         "description": "Authenticated user, projected for the wire."
+      },
+      "PreferencesResponse": {
+        "properties": {
+          "preferences": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Preferences",
+            "description": "All stored preferences for the authenticated user."
+          }
+        },
+        "type": "object",
+        "title": "PreferencesResponse",
+        "description": "Flat key-value map of the authenticated user's preferences.\n\nThe shape is intentionally a single ``preferences`` field rather\nthan the response body itself being a free-form object \u2014 FastAPI\n+ OpenAPI handle nested objects more reliably than top-level\n``additionalProperties`` schemas, and the frontend reads\n``response.preferences`` either way."
       },
       "ValidationError": {
         "properties": {

@@ -6,7 +6,16 @@ The full specification lives at [`.scratch/voice-ai-template/PRD.md`](./.scratch
 
 ## Status
 
-Foundation + auth tracer + voice loop tracer + tool-calling tracer. Workspace skeleton, tooling, Docker, the Supabase auth slice, the LiveKit + OpenAI Realtime voice loop, and the tool-registration / dispatch layer with two example tools are in place. Subsequent issues add memory and persistence.
+Foundation + auth tracer + voice loop tracer + tool-calling tracer + structured preferences tracer. Workspace skeleton, tooling, Docker, the Supabase auth slice, the LiveKit + OpenAI Realtime voice loop, the tool-registration / dispatch layer with two example tools, and the structured-preferences memory layer are in place. Subsequent issues add episodic memory and conversation persistence.
+
+## User memory
+
+The PRD calls for a hybrid memory model. The two halves are:
+
+- **Structured user preferences** — deterministic facts the user states explicitly ("my favorite color is blue", "respond in German"). They live in the `user_preferences` table keyed by `(user_id, key)`, exposed to the agent via `set_preference` / `get_preference` tools and to the frontend via `GET /preferences`. The "What I remember about you" sidebar on the talk page reads this list directly. Row-level security at the database isolates one user's preferences from another's — the application never has to remember to filter by user.
+- **Episodic and semantic memory** (issue 08) — less structured recall (things mentioned in passing, rough recollections of previous conversations) is delegated to `mem0` over pgvector with explicit `remember` / `recall` tools.
+
+Both layers store data in the same Supabase Postgres instance; the split is in the access pattern, not the storage. See [`.scratch/voice-ai-template/PRD.md`](./.scratch/voice-ai-template/PRD.md) for the full rationale.
 
 ## Getting started
 

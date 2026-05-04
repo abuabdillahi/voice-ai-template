@@ -2,6 +2,7 @@ import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
 
 import { supabase } from '@/lib/supabase';
 import { TalkPage } from '@/components/talk-page';
+import { MemorySidebar } from '@/components/memory-sidebar';
 import { Button } from '@/components/ui/button';
 
 export const Route = createFileRoute('/')({
@@ -35,8 +36,11 @@ function HomeRoute() {
           Sign out
         </Button>
       </header>
-      <main className="flex flex-1 items-stretch justify-center px-4 py-6">
+      <main className="flex flex-1 items-start justify-center gap-4 px-4 py-6">
         <TalkPage />
+        <aside className="w-72 flex-shrink-0">
+          <MemorySidebar />
+        </aside>
       </main>
     </div>
   );

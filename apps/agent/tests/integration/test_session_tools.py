@@ -52,9 +52,12 @@ def test_agent_registers_all_core_tools() -> None:
     registered_names = {t.info.name for t in agent.tools}  # type: ignore[union-attr]
     expected_names = {schema.name for schema in all_tools()}
     assert registered_names == expected_names
-    # Both example tools must be present after issue 06.
+    # Issue 06 tools.
     assert "get_current_time" in registered_names
     assert "get_weather" in registered_names
+    # Issue 07 tools — structured preferences.
+    assert "set_preference" in registered_names
+    assert "get_preference" in registered_names
 
 
 def test_agent_tool_schemas_match_registry() -> None:
