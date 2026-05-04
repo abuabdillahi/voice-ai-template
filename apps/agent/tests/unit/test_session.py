@@ -103,7 +103,10 @@ def test_build_system_prompt_inlines_stored_preferences() -> None:
 
 def test_build_system_prompt_omits_facts_block_when_no_extra_preferences() -> None:
     prompt = build_system_prompt("Sam", {"preferred_name": "Sam", "voice": "sage"})
-    assert "Known facts" not in prompt
+    # The SYSTEM_PROMPT mentions "Known facts" in its meta-instructions;
+    # we are checking the absence of the appended facts list. The list
+    # uses the literal "Known facts about the user (from prior" header.
+    assert "Known facts about the user (from prior" not in prompt
 
 
 def test_build_agent_uses_custom_instructions() -> None:

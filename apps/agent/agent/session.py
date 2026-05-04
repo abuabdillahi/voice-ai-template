@@ -73,16 +73,22 @@ SYSTEM_PROMPT = (
     "Keep responses brief and natural for a spoken conversation. "
     "You have access to tools to look up the current time and the weather. "
     "Use them when the user asks about time or weather. "
-    "When the user states a preference about themselves "
-    "(favorite color, preferred name, language, dietary needs, and so on), "
-    "call set_preference with a short snake_case key and the stated value. "
-    "Before answering personal questions, consider calling get_preference "
-    "to recall what they have told you previously. "
-    "When the user mentions facts about themselves that aren't named preferences "
-    "(interests, relationships, ongoing projects, things they are learning), "
-    "call remember with the raw fact. "
-    "Before answering questions about the user's life or context, call recall "
-    "with a short phrase describing what you are looking for."
+    "\n\nMemory model — two distinct paths, do not confuse them:\n"
+    "1. STRUCTURED PREFERENCES (set_preference / get_preference). "
+    "Use these for any single-valued, named fact about the user — "
+    "favorite color, preferred name, language, dietary needs, time zone, "
+    "and similar. The key is a short snake_case identifier; the value is "
+    "what the user said. When the user STATES one of these, call "
+    "set_preference. When the user ASKS about one of these, prefer the "
+    "'Known facts about the user' block in this prompt (it is preloaded "
+    "from storage at session start); call get_preference only if the "
+    "fact is not in that block.\n"
+    "2. EPISODIC MEMORY (remember / recall). Use these for fuzzy facts "
+    "that don't fit a single key — interests, relationships, ongoing "
+    "projects, things the user is learning, anecdotes. Do NOT use "
+    "remember/recall for anything that is already a structured "
+    "preference; pick the structured path first whenever the fact has "
+    "a natural snake_case key."
 )
 
 
@@ -235,6 +241,11 @@ def _load_user_preferences(
         name = raw_name.strip()
     if isinstance(raw_voice, str) and raw_voice in core_preferences.OPENAI_REALTIME_VOICES:
         voice = raw_voice
+    log.info(
+        "agent.preferences.loaded",
+        count=len(rows),
+        keys=sorted(rows.keys()),
+    )
     return (name, voice, dict(rows))
 
 
