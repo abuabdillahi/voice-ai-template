@@ -19,6 +19,9 @@ node_modules/
 .turbo/
 *.tsbuildinfo
 
+# Local tool caches
+.uv-cache/
+
 # Build outputs
 dist/
 build/

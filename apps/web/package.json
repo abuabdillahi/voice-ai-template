@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "echo \"web: dev stub (Vite wired up in issue 04)\"",
     "build": "echo \"web: build stub\"",
-    "lint": "echo \"web: lint stub (real config arrives in issue 02)\"",
-    "test": "echo \"web: test stub\"",
-    "typecheck": "echo \"web: typecheck stub\""
+    "lint": "eslint . --max-warnings 0",
+    "test": "echo \"web: test stub (vitest wired up alongside the SPA in issue 04)\"",
+    "typecheck": "tsc --noEmit"
   }
 }

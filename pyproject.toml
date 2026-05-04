@@ -9,6 +9,15 @@ dependencies = [
     "core",
 ]
 
+[dependency-groups]
+dev = [
+    "ruff>=0.6.0",
+    "mypy>=1.11",
+    "pytest>=8.0",
+    "pre-commit>=3.7",
+    "detect-secrets>=1.5",
+]
+
 [tool.uv]
 package = false
 
@@ -19,3 +28,67 @@ core = { workspace = true }
 
 [tool.uv.workspace]
 members = ["apps/api", "apps/agent", "packages/core"]
+
+# ----------------------------------------------------------------------------
+# Ruff — Python linting & formatting
+# ----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = [
+    ".venv",
+    ".uv-cache",
+    "node_modules",
+    "dist",
+    "build",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "PIE", "RET", "SIM", "ARG"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/**" = ["ARG", "B"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ----------------------------------------------------------------------------
+# Mypy — Python type checking (strict)
+# ----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+pretty = true
+exclude = [
+    "^\\.venv/",
+    "^\\.uv-cache/",
+    "^node_modules/",
+    "^dist/",
+    "^build/",
+]
+
+# Empty stub packages (no source yet) — keep strict mode but tolerate the
+# absence of typed bodies. Per-package overrides will be tightened as real
+# code lands in subsequent issues.
+[[tool.mypy.overrides]]
+module = ["api.*", "agent.*", "core.*"]
+ignore_missing_imports = true
+
+# ----------------------------------------------------------------------------
+# Pytest
+# ----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["apps", "packages"]
+markers = [
+    "integration: marks tests as integration (deselect with '-m \"not integration\"')",
+]
+addopts = "-ra"
