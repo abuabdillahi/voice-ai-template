@@ -1,0 +1,12 @@
+{
+  "name": "@voice-ai/core",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo \"core: no dev task\"",
+    "build": "echo \"core: no build task\"",
+    "lint": "echo \"core: lint stub (real config arrives in issue 02)\"",
+    "test": "echo \"core: test stub\"",
+    "typecheck": "echo \"core: typecheck stub\""
+  }
+}

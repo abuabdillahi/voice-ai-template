@@ -1,0 +1,55 @@
+version = 1
+revision = 3
+requires-python = ">=3.13"
+
+[manifest]
+members = [
+    "agent",
+    "api",
+    "core",
+    "voice-ai",
+]
+
+[[package]]
+name = "agent"
+version = "0.0.0"
+source = { editable = "apps/agent" }
+dependencies = [
+    { name = "core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "core", editable = "packages/core" }]
+
+[[package]]
+name = "api"
+version = "0.0.0"
+source = { editable = "apps/api" }
+dependencies = [
+    { name = "core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "core", editable = "packages/core" }]
+
+[[package]]
+name = "core"
+version = "0.0.0"
+source = { editable = "packages/core" }
+
+[[package]]
+name = "voice-ai"
+version = "0.0.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "agent" },
+    { name = "api" },
+    { name = "core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agent", editable = "apps/agent" },
+    { name = "api", editable = "apps/api" },
+    { name = "core", editable = "packages/core" },
+]
