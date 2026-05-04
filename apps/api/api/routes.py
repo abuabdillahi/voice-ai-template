@@ -109,16 +109,27 @@ def livekit_token(
     current_user: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
     payload: LivekitTokenRequest | None = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> LivekitTokenResponse:
     """Mint a LiveKit access token for the authenticated user.
 
-    The route is a thin adapter over :func:`core.livekit.issue_token`;
-    the token's `identity` is the Supabase user id and the room
-    defaults to ``user-{userId}`` when the client does not specify one.
+    The route is a thin adapter over :func:`core.livekit.issue_token`.
+    The token's ``identity`` is the Supabase user id and the room
+    defaults to ``user-{userId}`` when the client does not specify
+    one. The user's Supabase access token is embedded in the LiveKit
+    token's ``metadata`` claim so the agent worker can forward it to
+    RLS-scoped database calls (see :mod:`core.livekit` for the
+    security trade-offs of that approach).
     """
     requested_room = payload.room if payload and payload.room else None
     room = requested_room or f"user-{current_user.id}"
-    token = issue_token(current_user, room=room, settings=settings)
+    supabase_token = _bearer_token(authorization)
+    token = issue_token(
+        current_user,
+        room=room,
+        supabase_access_token=supabase_token,
+        settings=settings,
+    )
     return LivekitTokenResponse(token=token, url=settings.livekit_url, room=room)
 
 

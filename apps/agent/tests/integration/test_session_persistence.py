@@ -181,3 +181,59 @@ def test_resolve_supabase_token_extracts_value_from_json_metadata() -> None:
             return _Claims()
 
     assert _resolve_supabase_token(_Ctx()) == "user-jwt"  # type: ignore[arg-type]
+
+
+def test_token_roundtrip_from_issue_token_to_resolve_supabase_token() -> None:
+    """End-to-end metadata round-trip — the contract issue 12 establishes.
+
+    Mint a LiveKit token with ``core.livekit.issue_token`` carrying a
+    fake Supabase JWT, decode it the same way the LiveKit Agents
+    framework decodes participant tokens, then run
+    ``_resolve_supabase_token`` on the resulting claims. If the round
+    trip survives, the production path (API mints → frontend connects
+    → agent reads) is wired correctly.
+    """
+    import json as _json
+
+    from core.auth import User
+    from core.config import Settings
+    from core.livekit import issue_token
+    from jose import jwt
+
+    settings = Settings(
+        supabase_url="https://test.supabase.co",
+        supabase_anon_key="test-anon",
+        supabase_jwt_secret="test-secret",
+        livekit_url="wss://test.livekit.cloud",
+        livekit_api_key="lk-test-key",
+        livekit_api_secret="lk-test-secret",
+        openai_api_key="sk-test-openai",
+    )
+    user = User(id=UUID("11111111-1111-1111-1111-111111111111"), email="alice@example.com")
+
+    livekit_jwt = issue_token(
+        user,
+        room="user-abc",
+        supabase_access_token="downstream-supabase-jwt",
+        settings=settings,
+    )
+
+    claims_dict = jwt.decode(
+        livekit_jwt,
+        settings.livekit_api_secret,
+        algorithms=["HS256"],
+        options={"verify_aud": False},
+    )
+
+    class _Claims:
+        metadata = claims_dict["metadata"]
+
+    class _Ctx:
+        def token_claims(self) -> Any:
+            return _Claims()
+
+    resolved = _resolve_supabase_token(_Ctx())  # type: ignore[arg-type]
+    assert resolved == "downstream-supabase-jwt"
+
+    # Sanity: the metadata blob is exactly the shape both sides agree on.
+    assert _json.loads(_Claims.metadata) == {"supabase_access_token": "downstream-supabase-jwt"}

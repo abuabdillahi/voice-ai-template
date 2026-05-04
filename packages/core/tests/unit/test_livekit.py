@@ -8,6 +8,7 @@ requested room with publish + subscribe scopes.
 
 from __future__ import annotations
 
+import json
 import time
 from uuid import UUID
 
@@ -66,3 +67,42 @@ def test_issue_token_custom_ttl(settings: Settings) -> None:
     claims = _decode(token, settings)
     exp = int(claims["exp"])  # type: ignore[arg-type]
     assert exp <= before + 65
+
+
+def test_issue_token_omits_metadata_when_no_supabase_token(settings: Settings) -> None:
+    """Without a supabase_access_token, the metadata claim is absent or empty."""
+    token = issue_token(_user(), room="user-abc", settings=settings)
+    claims = _decode(token, settings)
+    # LiveKit either omits the metadata claim entirely or sets it to an
+    # empty string when it is not provided. Both are acceptable.
+    assert not claims.get("metadata")
+
+
+def test_issue_token_embeds_supabase_token_in_metadata(settings: Settings) -> None:
+    token = issue_token(
+        _user(),
+        room="user-abc",
+        supabase_access_token="user-jwt-abc123",
+        settings=settings,
+    )
+    claims = _decode(token, settings)
+    metadata_raw = claims["metadata"]
+    assert isinstance(metadata_raw, str) and metadata_raw, "metadata should be set"
+    metadata = json.loads(metadata_raw)
+    assert metadata == {"supabase_access_token": "user-jwt-abc123"}
+
+
+def test_issue_token_metadata_round_trips_through_decode(settings: Settings) -> None:
+    """The metadata shape exactly matches what `_resolve_supabase_token` parses.
+
+    Pinning the wire shape so changes to either side are caught by tests.
+    """
+    token = issue_token(
+        _user(),
+        room="user-abc",
+        supabase_access_token="abc",
+        settings=settings,
+    )
+    metadata_raw = _decode(token, settings)["metadata"]
+    decoded = json.loads(metadata_raw)  # type: ignore[arg-type]
+    assert decoded.get("supabase_access_token") == "abc"

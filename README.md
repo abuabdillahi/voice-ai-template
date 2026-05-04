@@ -185,6 +185,19 @@ The default realtime model is OpenAI's `gpt-realtime`.
 
 Subsequent slices may swap providers; the swap point is a single function in `core.realtime`. See `core/realtime.py` for the seam.
 
+### Per-user database writes from the agent
+
+The agent worker writes to RLS-protected tables (`user_preferences`, `conversations`, `messages`, mem0 memories) on behalf of the signed-in user. To honour those policies, it needs the user's Supabase JWT — Supabase RLS keys off `auth.uid()`, which is derived from the bearer token, not from a service role.
+
+The token reaches the agent via the **LiveKit participant metadata**:
+
+1. Frontend POSTs `/livekit/token` with its Supabase access token in the `Authorization: Bearer …` header.
+2. The API route mints a LiveKit access token whose `metadata` claim holds `{"supabase_access_token": "<jwt>"}`.
+3. Frontend uses that token to join the room.
+4. Agent worker calls `_resolve_supabase_token(ctx)` at session start, parses the metadata, and forwards the JWT to every `core.preferences` / `core.memory` / `core.conversations` call it makes on the user's behalf.
+
+**Security note.** LiveKit metadata is decodable by anyone holding the LiveKit access token. In this template that is acceptable — the same client (the signed-in user's browser) already holds the Supabase JWT in its session storage, so embedding it in the LiveKit token does not widen its exposure. **Downstream apps with stricter requirements** (shared rooms, spectator participants, third-party agents) should pass the token through a server-side relay instead — e.g. a separate `POST /agent/dispatch` call that issues the LiveKit token without metadata and forwards the Supabase JWT directly to the agent worker through a private channel.
+
 ### Observability
 
 The agent worker emits one structured `turn_metrics` JSON log line per LiveKit metric event (LLM TTFT, TTS TTFB, end-of-utterance delay, etc.) on stdout. The line carries the bound `session_id` and `user_id` contextvars, so a single conversation is grep-able from the worker's log stream:

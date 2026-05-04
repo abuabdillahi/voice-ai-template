@@ -68,3 +68,15 @@ None — all dependencies (issues 04, 05, 07, 08, 09) are merged. Can start imme
 **2026-05-04 — Issue created.** Captures the deliberately-deferred Supabase-token plumbing originally noted as a `TODO(issue 09)` in `apps/agent/agent/session.py:334` and as graceful-degrade paths in `core.preferences`, `core.memory`, and `core.conversations`. The TODO was scoped to issue 09 in the comment but the impact is broader — it affects every RLS-scoped write the agent performs across issues 07, 08, and 09. Promoting to its own ticket so the work is visible and trackable rather than buried in inline TODOs.
 
 **2026-05-04 — Promoted to `ready-for-agent`.** Maintainer triaged via `/triage 12 to ready-for-agent`. Issue body above is treated as the agent brief; no separate brief was authored (same pattern as the bulk promotion of issues 01–11). All dependencies (issues 04, 05, 07, 08, 09) are already merged — issue is unblocked and can be picked up immediately.
+
+**2026-05-04 — Implemented.** All AC items met:
+
+- `core.livekit.issue_token` accepts `supabase_access_token: str | None = None`. When provided, JSON-encodes `{"supabase_access_token": "<jwt>"}` and attaches via `AccessToken.with_metadata(...)`. Default `None` leaves metadata unset.
+- `apps/api` `/livekit/token` route: extracts the bearer token via the existing `_bearer_token` helper and forwards it to `issue_token`.
+- `apps/agent/agent/session.py` `_resolve_supabase_token` docstring tightened to reflect the wired-up state. The graceful-degrade fallback is kept as defence in depth (older clients, manual `livekit dispatch` invocations).
+- Tests added: 3 new `test_livekit.py` cases covering with-token / without-token / round-trip; 1 new `test_livekit_token.py` case asserting the API-issued JWT carries the metadata; 1 new end-to-end round-trip test in `test_session_persistence.py` that mints via `core.livekit.issue_token` and resolves via `_resolve_supabase_token`. Existing `test_resolve_supabase_token_*` cases unchanged.
+- README "Per-user database writes from the agent" subsection added under "Voice loop setup" explaining the metadata flow and the security trade-off, with guidance for downstream apps that need a server-side relay instead.
+
+Verified: `pnpm exec turbo run lint typecheck test --force` passes 12/12 across all packages; `pnpm exec prettier --check .` clean.
+
+No deviations from the AC.
