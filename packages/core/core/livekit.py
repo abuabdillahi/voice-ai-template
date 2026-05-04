@@ -72,6 +72,11 @@ def issue_token(
         can_publish=True,
         can_subscribe=True,
         can_publish_data=True,
+        # The frontend updates `supabase_access_token` on Supabase
+        # `TOKEN_REFRESHED` events; without this grant LiveKit rejects
+        # the setAttributes call with "does not have permission to
+        # update own metadata" and long sessions can't refresh.
+        can_update_own_metadata=True,
     )
 
     room_config = RoomConfiguration(
