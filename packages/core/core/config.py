@@ -60,6 +60,36 @@ class Settings(BaseSettings):
         ..., description="OpenAI API key used by the default realtime model."
     )
 
+    # --- mem0 (episodic memory) ---
+    # mem0 stores vectors in pgvector against the same Supabase Postgres,
+    # but its connection is pooled at the database (not REST) layer so it
+    # needs the raw Postgres URL rather than the Supabase REST URL. The
+    # variable is optional because the unit-test path mocks the mem0
+    # client at the seam — production deployments must provide it.
+    mem0_postgres_url: str = Field(
+        default="",
+        description=(
+            "PostgreSQL connection URL for mem0's pgvector backend. "
+            "Typically the same Postgres instance Supabase manages, "
+            "addressed via the connection-pooler URL. Empty in tests."
+        ),
+    )
+    mem0_collection: str = Field(
+        default="mem0_memories",
+        description=(
+            "Name of the pgvector table mem0 writes memories to. "
+            "Must match the table created in `0003_mem0_memories.sql`."
+        ),
+    )
+    mem0_embedding_dims: int = Field(
+        default=1536,
+        description=(
+            "Dimensionality of the embedding model mem0 uses. Must match "
+            "the `vector(N)` column in the migration. The default tracks "
+            "OpenAI's text-embedding-3-small."
+        ),
+    )
+
     # --- HTTP / observability ---
     cors_origins: str = Field(
         default="http://localhost:5173",

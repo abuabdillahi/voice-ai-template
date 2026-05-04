@@ -194,6 +194,68 @@
         }
       }
     },
+    "/memories/recent": {
+      "get": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "List Recent Memories",
+        "description": "Return the authenticated user's recent episodic memories.\n\nThin adapter over :func:`core.memory.list_recent`. The user's\nbearer token is forwarded for symmetry with the preferences route;\nmem0 itself does not consume the Supabase JWT today (it talks to\nPostgres directly), but RLS policies on ``mem0_memories`` enforce\nuser isolation at the database level \u2014 see ``0003_mem0_memories.sql``.",
+        "operationId": "list_recent_memories_memories_recent_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 10,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/conversations": {
       "get": {
         "tags": [
@@ -546,6 +608,42 @@
         ],
         "title": "MeResponse",
         "description": "Authenticated user, projected for the wire."
+      },
+      "MemoriesResponse": {
+        "properties": {
+          "memories": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryItem"
+            },
+            "type": "array",
+            "title": "Memories",
+            "description": "The authenticated user's most recent memories, newest-first by mem0's ordering."
+          }
+        },
+        "type": "object",
+        "title": "MemoriesResponse",
+        "description": "Response payload for ``GET /memories/recent``."
+      },
+      "MemoryItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Stable identifier mem0 assigns to the memory."
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "The remembered fact, in natural language."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "content"
+        ],
+        "title": "MemoryItem",
+        "description": "One recalled memory, projected for the wire.\n\nMirrors :class:`core.memory.Memory`. We expose ``id`` so a future\nUI can attribute updates back to the same memory; ``score`` is\nintentionally omitted from the listing endpoint because the\nsidebar lists rather than ranks."
       },
       "MessageItem": {
         "properties": {

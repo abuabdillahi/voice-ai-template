@@ -76,7 +76,12 @@ SYSTEM_PROMPT = (
     "(favorite color, preferred name, language, dietary needs, and so on), "
     "call set_preference with a short snake_case key and the stated value. "
     "Before answering personal questions, consider calling get_preference "
-    "to recall what they have told you previously."
+    "to recall what they have told you previously. "
+    "When the user mentions facts about themselves that aren't named preferences "
+    "(interests, relationships, ongoing projects, things they are learning), "
+    "call remember with the raw fact. "
+    "Before answering questions about the user's life or context, call recall "
+    "with a short phrase describing what you are looking for."
 )
 
 

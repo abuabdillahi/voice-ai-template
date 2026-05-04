@@ -20,6 +20,7 @@ from __future__ import annotations
 # import of `core.tools`. Downstream developers wire up their own
 # tools the same way: `import myapp.tools` once at process start.
 from core.tools import examples as examples  # noqa: F401
+from core.tools import memory as memory  # noqa: F401
 from core.tools import preferences as preferences  # noqa: F401
 from core.tools.registry import (
     ToolContext,

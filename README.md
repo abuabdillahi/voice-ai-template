@@ -6,16 +6,16 @@ The full specification lives at [`.scratch/voice-ai-template/PRD.md`](./.scratch
 
 ## Status
 
-Foundation + auth tracer + voice loop tracer + tool-calling tracer + structured preferences tracer + conversation persistence tracer. Workspace skeleton, tooling, Docker, the Supabase auth slice, the LiveKit + OpenAI Realtime voice loop, the tool-registration / dispatch layer with two example tools, the structured-preferences memory layer, and persisted conversation transcripts with the history pages are in place. Subsequent issues add episodic memory.
+Foundation + auth tracer + voice loop tracer + tool-calling tracer + structured preferences tracer + episodic memory tracer + conversation persistence tracer. Workspace skeleton, tooling, Docker, the Supabase auth slice, the LiveKit + OpenAI Realtime voice loop, the tool-registration / dispatch layer with two example tools, the structured-preferences memory layer, the mem0-backed episodic memory layer, and persisted conversation transcripts with the history pages are in place.
 
 ## User memory
 
-The PRD calls for a hybrid memory model. The two halves are:
+The PRD calls for a hybrid memory model. The two halves are deliberately separate access patterns over the **same Postgres instance** — the split is in how memory is named and queried, not where bytes live:
 
-- **Structured user preferences** — deterministic facts the user states explicitly ("my favorite color is blue", "respond in German"). They live in the `user_preferences` table keyed by `(user_id, key)`, exposed to the agent via `set_preference` / `get_preference` tools and to the frontend via `GET /preferences`. The "What I remember about you" sidebar on the talk page reads this list directly. Row-level security at the database isolates one user's preferences from another's — the application never has to remember to filter by user.
-- **Episodic and semantic memory** (issue 08) — less structured recall (things mentioned in passing, rough recollections of previous conversations) is delegated to `mem0` over pgvector with explicit `remember` / `recall` tools.
+- **Structured user preferences** — deterministic facts the user states explicitly ("my favorite color is blue", "respond in German"). They live in the `user_preferences` table keyed by `(user_id, key)`, are exposed to the agent via `set_preference` / `get_preference` tools, and surface in the "What I remember about you" sidebar via `GET /preferences`. Lookup is a primary-key read; updates are deterministic upserts. Use this when the agent needs to retrieve a value by name.
+- **Episodic memory** — incidental facts mentioned in passing ("I'm learning Spanish", "my daughter is named Maya"). They live in the `mem0_memories` pgvector table managed by [mem0](https://github.com/mem0ai/mem0), exposed to the agent via `remember` / `recall` tools, and surface in the "Recent memories" sidebar section via `GET /memories/recent`. mem0 owns fact extraction, deduplication, conflict resolution on contradicting facts, and similarity search. Use this when the agent needs to find something _related to a query_ without knowing a specific key.
 
-Both layers store data in the same Supabase Postgres instance; the split is in the access pattern, not the storage. See [`.scratch/voice-ai-template/PRD.md`](./.scratch/voice-ai-template/PRD.md) for the full rationale.
+Row-level security at the database isolates one user's data from another's on both tables — the application never has to remember to filter by user. The mem0 table's RLS predicate filters on `payload->>'user_id'` because mem0 stores ownership in the JSONB payload rather than a typed column; behaviourally the isolation is identical to the preferences table's `auth.uid() = user_id`. See [`.scratch/voice-ai-template/PRD.md`](./.scratch/voice-ai-template/PRD.md) for the full rationale.
 
 ## Conversation history
 
