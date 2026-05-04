@@ -97,6 +97,7 @@ class _SessionDeps:
 
     user: User
     log: Any  # structlog BoundLogger; kept loose to avoid a hard dep here.
+    supabase_access_token: str | None = None
 
 
 def _resolve_user_from_participant(participant: Any) -> User:
@@ -140,7 +141,11 @@ def _make_livekit_tool(schema_name: str, deps: _SessionDeps) -> Any:
 
     @function_tool(raw_schema=raw_schema)
     async def _invoke(raw_arguments: dict[str, Any], **_: Any) -> str:
-        domain_ctx = DomainToolContext(user=deps.user, log=deps.log)
+        domain_ctx = DomainToolContext(
+            user=deps.user,
+            log=deps.log,
+            supabase_access_token=deps.supabase_access_token,
+        )
         result = await dispatch(schema_name, raw_arguments, domain_ctx)
         # The realtime model expects a string result. JSON-encode
         # mappings (errors, structured outputs) so the model gets a
@@ -492,7 +497,18 @@ async def entrypoint(ctx: JobContext) -> None:
     participant = await ctx.wait_for_participant()
 
     user = _resolve_user_from_participant(participant)
-    deps = _SessionDeps(user=user, log=log.bind(user_id=str(user.id)))
+    # Resolve the Supabase token from participant metadata BEFORE
+    # building deps — `_SessionDeps.supabase_access_token` is what the
+    # tool dispatcher reads to forward the user's JWT to RLS-scoped
+    # core operations (set_preference, remember, conversation
+    # persistence). Without it, every tool no-ops with a "no
+    # credentials" message.
+    supabase_token = _resolve_supabase_token(participant)
+    deps = _SessionDeps(
+        user=user,
+        log=log.bind(user_id=str(user.id)),
+        supabase_access_token=supabase_token,
+    )
 
     # ------------------------------------------------------------------
     # Issue 11 — bind session-scoped contextvars so every log line
@@ -506,16 +522,6 @@ async def entrypoint(ctx: JobContext) -> None:
     session_id = ctx.room.name
     user_id_str = str(user.id)
     bind_log_context(session_id=session_id, user_id=user_id_str)
-
-    # ------------------------------------------------------------------
-    # Issue 09 — open a conversation row so we have an id to attach
-    # subsequent message rows to. When the Supabase token is missing
-    # (the plumbing is wired up incrementally — see
-    # `_resolve_supabase_token`), persistence is skipped: the voice
-    # loop must keep working even before transcript storage is fully
-    # configured.
-    # ------------------------------------------------------------------
-    supabase_token = _resolve_supabase_token(participant)
     conv_id: UUID | None = None
     if supabase_token is not None:
         try:
