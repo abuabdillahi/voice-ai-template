@@ -105,6 +105,27 @@ def _build_client(settings: Settings) -> MemoryClientProtocol:
     from mem0 import Memory as Mem0Memory
 
     config: dict[str, Any] = {
+        # Pin the fact-extraction LLM. mem0's default in current
+        # releases routes through OpenAI's `max_tokens` parameter, which
+        # gpt-5 / o-series models reject with:
+        #     'max_tokens' is not supported with this model.
+        #     Use 'max_completion_tokens' instead.
+        # Pinning to gpt-4o-mini keeps extraction fast, cheap, and on
+        # the legacy completion API mem0 currently expects.
+        "llm": {
+            "provider": "openai",
+            "config": {
+                "model": "gpt-4o-mini",
+                "api_key": settings.openai_api_key,
+            },
+        },
+        "embedder": {
+            "provider": "openai",
+            "config": {
+                "model": "text-embedding-3-small",
+                "api_key": settings.openai_api_key,
+            },
+        },
         "vector_store": {
             "provider": "pgvector",
             "config": {
