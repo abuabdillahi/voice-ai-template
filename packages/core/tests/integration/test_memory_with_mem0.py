@@ -49,9 +49,9 @@ PostgresContainer = testcontainers_postgres.PostgresContainer
 pytestmark = pytest.mark.integration
 
 
-_INIT_MIGRATION = Path(__file__).resolve().parents[3] / "supabase" / "migrations" / "0000_init.sql"
+_INIT_MIGRATION = Path(__file__).resolve().parents[4] / "supabase" / "migrations" / "0000_init.sql"
 _MEMORY_MIGRATION = (
-    Path(__file__).resolve().parents[3] / "supabase" / "migrations" / "0003_mem0_memories.sql"
+    Path(__file__).resolve().parents[4] / "supabase" / "migrations" / "0003_mem0_memories.sql"
 )
 
 
@@ -93,6 +93,11 @@ def pg_url() -> Iterator[str]:
             cur.execute(
                 "grant select, insert, update, delete on public.mem0_memories to authenticated;"
             )
+            # The vector cast in test inserts is qualified as
+            # ``extensions.vector``; the role needs USAGE on the schema
+            # to resolve the type. Production Supabase grants this by
+            # default to the runtime roles.
+            cur.execute("grant usage on schema extensions to authenticated;")
         yield url
 
 
@@ -157,9 +162,14 @@ def _insert_memory(
     import json as _json
 
     with conn.cursor() as cur:
+        # Cast is qualified as ``extensions.vector`` because the migration
+        # installs pgvector under the ``extensions`` schema and the test
+        # session's search_path doesn't include it. Production Supabase
+        # roles do have ``extensions`` on the path; the testcontainer
+        # fixture doesn't replicate that wiring.
         cur.execute(
             "insert into public.mem0_memories (id, vector, payload) "
-            "values (%s, %s::vector, %s::jsonb);",
+            "values (%s, %s::extensions.vector, %s::jsonb);",
             (str(memory_id), str(vec), _json.dumps(payload)),
         )
     return memory_id

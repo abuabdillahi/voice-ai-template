@@ -41,7 +41,7 @@ PostgresContainer = testcontainers_postgres.PostgresContainer
 pytestmark = pytest.mark.integration
 
 
-_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[4] / "supabase" / "migrations"
 _PREFS_MIGRATION = _MIGRATIONS_DIR / "0001_user_preferences.sql"
 _CONVS_MIGRATION = _MIGRATIONS_DIR / "0002_conversations.sql"
 

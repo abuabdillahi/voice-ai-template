@@ -181,6 +181,50 @@ A code-only change → `docker compose restart`. A change to `pyproject.toml` (a
 
 ---
 
+## Tests / CI
+
+### Integration tests fail with `FileNotFoundError` on a migration SQL file
+
+**Symptom:**
+```
+FileNotFoundError: [Errno 2] No such file or directory:
+  '<repo>/packages/supabase/migrations/0001_user_preferences.sql'
+```
+…and similar for `0000_init.sql`, `0002_conversations.sql`, `0003_mem0_memories.sql`.
+
+**Cause:** The three RLS integration tests under `packages/core/tests/integration/` anchored the migrations directory with `Path(__file__).resolve().parents[3]`. From `packages/core/tests/integration/<file>.py` that resolves to `packages/`, so the tests probe `packages/supabase/migrations/...`. The migrations live at the **repo root**, `./supabase/migrations/`, so the correct index is `parents[4]`. CI did not catch this because there was no pytest job — the unit and integration suites were never run automatically. The combination of the two failures meant the integration suite was effectively dark from the day issue 09 landed.
+
+**Fix:** `parents[3]` → `parents[4]` in `test_preferences_rls.py`, `test_conversations_rls.py`, and `test_memory_with_mem0.py` (two locations). Same change added a `tests` job to `.github/workflows/ci.yml` running `uv run pytest` so the same drift on a future tree-shuffle fails loudly within minutes instead of silently for months.
+
+### Integration tests fail with `testcontainers-ryuk-... is already in use`
+
+**Symptom:**
+```
+docker.errors.APIError: 409 Client Error ... Conflict
+  ("Conflict. The container name "/testcontainers-ryuk-<uuid>" is already in use ...")
+```
+
+**Cause:** The integration suite has three module-scoped Postgres fixtures (one per RLS test module). The testcontainers-python reaper ("Ryuk") is meant to be a process singleton, but in practice it races itself across module setups and a second instantiation collides with the first. The reaper exists for crash-recovery cleanup of orphaned containers — irrelevant for a tidy `with PostgresContainer(...) as pg` block that already stops the container on a graceful exit.
+
+**Fix:** `packages/core/tests/conftest.py` sets `TESTCONTAINERS_RYUK_DISABLED=true` via `os.environ.setdefault` at import time, before any test module imports `testcontainers`. Idempotent (a developer can still flip it back on with an explicit env var).
+
+### `type "vector" does not exist` in the mem0 integration test
+
+**Symptom:**
+```
+psycopg.errors.UndefinedObject: type "vector" does not exist
+LINE 1: ...m0_memories (id, vector, payload) values ($1, $2::vector, $3...
+```
+Or, after qualifying the cast: `psycopg.errors.InsufficientPrivilege: permission denied for schema extensions`.
+
+**Cause:** The migration installs pgvector under the `extensions` schema (`create extension ... with schema "extensions"`). Production Supabase configures the runtime roles' `search_path` to include `extensions` and grants `USAGE` on the schema. The plain Postgres testcontainer does neither, so an unqualified `%s::vector` cast can't resolve the type, and even a qualified `%s::extensions.vector` is blocked by schema permissions.
+
+**Fix in `test_memory_with_mem0.py`:**
+1. Qualify the cast in `_insert_memory` as `%s::extensions.vector` so it doesn't depend on `search_path`. (Setting `SET LOCAL search_path` per-session looked like the right fix but didn't take effect under the test's `SET LOCAL ROLE authenticated` flow — couldn't isolate why; the qualified cast is bulletproof regardless.)
+2. `grant usage on schema extensions to authenticated` in the bootstrap so the role can resolve the qualified type.
+
+---
+
 ## How to extend this doc
 
 When you fix a non-obvious bug whose symptom won't be self-explanatory from the code:

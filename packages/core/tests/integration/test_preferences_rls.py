@@ -54,7 +54,7 @@ pytestmark = pytest.mark.integration
 # Path to the migration file. Computed once at import time so the test
 # fails loudly if the file ever moves or is renamed.
 _MIGRATION_PATH = (
-    Path(__file__).resolve().parents[3] / "supabase" / "migrations" / "0001_user_preferences.sql"
+    Path(__file__).resolve().parents[4] / "supabase" / "migrations" / "0001_user_preferences.sql"
 )
 
 
