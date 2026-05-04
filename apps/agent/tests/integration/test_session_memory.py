@@ -116,17 +116,12 @@ async def test_remember_then_recall_dispatches_through_mem0() -> None:
         assert isinstance(recalled, str)
         assert "Spanish" in recalled
 
-        # Both mem0 calls landed with the right arguments. mem0 ≥2.0
-        # routes the per-user scope through `filters`; we also pass
-        # `user_id` for backward compat across versions.
+        # `add` keeps the top-level `user_id`. `search`/`get_all` route
+        # the per-user scope through `filters` (mem0 ≥2.0).
         assert fake.add_calls == [
             (
                 "I'm learning Spanish",
-                {
-                    "user_id": str(deps.user.id),
-                    "filters": {"user_id": str(deps.user.id)},
-                    "metadata": None,
-                },
+                {"user_id": str(deps.user.id), "filters": None, "metadata": None},
             ),
         ]
         assert fake.search_calls == [

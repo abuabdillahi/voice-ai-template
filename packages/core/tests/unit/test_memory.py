@@ -92,11 +92,10 @@ def test_remember_calls_mem0_add_with_str_user_id(fake_client: _FakeMem0) -> Non
     assert len(fake_client.add_calls) == 1
     content, kwargs = fake_client.add_calls[0]
     assert content == "I'm learning Spanish"
-    # mem0 ≥2.0 wants the per-user scope inside `filters`. We also pass
-    # `user_id` for backward-compat with versions that still wire the
-    # top-level kwarg to the JSONB payload.
+    # mem0's `add` still wants the top-level `user_id` kwarg — only
+    # `get_all`/`search` moved scoping into `filters`.
     assert kwargs["user_id"] == str(_USER.id)
-    assert kwargs["filters"] == {"user_id": str(_USER.id)}
+    assert kwargs["filters"] is None
 
 
 def test_recall_returns_list_of_memory_dataclasses(fake_client: _FakeMem0) -> None:

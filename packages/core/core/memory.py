@@ -191,7 +191,9 @@ def remember(
     list of created/updated memory ids if a UI surface needed them).
     """
     client = _get_client()
-    client.add(content, user_id=str(user.id), filters={"user_id": str(user.id)})
+    # mem0's `add` keeps the top-level `user_id` kwarg as the entity
+    # scope — only `get_all`/`search` moved scoping into `filters`.
+    client.add(content, user_id=str(user.id))
 
 
 def recall(
