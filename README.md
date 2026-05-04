@@ -32,6 +32,21 @@ pnpm install        # installs Node deps and links workspace packages
 uv sync             # installs Python deps and links workspace packages
 ```
 
+### One-time hook setup
+
+After cloning, install the git hooks so commits and pushes are automatically
+formatted, linted, type-checked, and rejected if the commit message is not in
+[Conventional Commits](https://www.conventionalcommits.org) format:
+
+```sh
+uv run pre-commit install --install-hooks
+uv run pre-commit install --hook-type pre-push
+uv run pre-commit install --hook-type commit-msg
+```
+
+Run `uv run pre-commit run --all-files` once after install to confirm
+everything is wired up.
+
 ### Common commands
 
 All cross-cutting commands run through Turborepo from the repo root:

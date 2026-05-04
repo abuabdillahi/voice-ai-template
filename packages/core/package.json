@@ -5,8 +5,9 @@
   "scripts": {
     "dev": "echo \"core: no dev task\"",
     "build": "echo \"core: no build task\"",
-    "lint": "echo \"core: lint stub (real config arrives in issue 02)\"",
-    "test": "echo \"core: test stub\"",
-    "typecheck": "echo \"core: typecheck stub\""
+    "lint": "uv run ruff check . && uv run ruff format --check .",
+    "format": "uv run ruff format .",
+    "test": "uv run pytest -m \"not integration\"",
+    "typecheck": "uv run mypy ."
   }
 }

@@ -5,8 +5,9 @@
   "scripts": {
     "dev": "echo \"agent: dev stub (worker wired up in issue 05)\"",
     "build": "echo \"agent: no build task\"",
-    "lint": "echo \"agent: lint stub (real config arrives in issue 02)\"",
-    "test": "echo \"agent: test stub\"",
-    "typecheck": "echo \"agent: typecheck stub\""
+    "lint": "uv run ruff check . && uv run ruff format --check .",
+    "format": "uv run ruff format .",
+    "test": "uv run pytest -m \"not integration\"",
+    "typecheck": "uv run mypy ."
   }
 }

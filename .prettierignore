@@ -1,0 +1,19 @@
+node_modules/
+.pnpm-store/
+.turbo/
+dist/
+build/
+out/
+.next/
+.venv/
+.uv-cache/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+pnpm-lock.yaml
+uv.lock
+.secrets.baseline
+*.tsbuildinfo
+
+# Issue-tracker scratch space — managed by agent skills, not formatters
+.scratch/

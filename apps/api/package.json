@@ -5,8 +5,9 @@
   "scripts": {
     "dev": "echo \"api: dev stub (uvicorn wired up in issue 04)\"",
     "build": "echo \"api: no build task\"",
-    "lint": "echo \"api: lint stub (real config arrives in issue 02)\"",
-    "test": "echo \"api: test stub\"",
-    "typecheck": "echo \"api: typecheck stub\""
+    "lint": "uv run ruff check . && uv run ruff format --check .",
+    "format": "uv run ruff format .",
+    "test": "uv run pytest -m \"not integration\"",
+    "typecheck": "uv run mypy ."
   }
 }
