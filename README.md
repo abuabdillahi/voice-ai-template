@@ -61,6 +61,32 @@ pnpm typecheck      # turbo run typecheck
 
 Real implementations of these scripts arrive in subsequent issues.
 
+## Running locally
+
+The dev stack splits across two ecosystems:
+
+- **`api` and `agent`** run in Docker via compose. Both services load environment variables from a top-level `.env` file (copy `.env.example` to `.env` first).
+- **`web`** runs outside compose so Vite's HMR works directly against the host. It will be wired up in issue 04; until then `pnpm dev` is a no-op.
+
+```sh
+cp .env.example .env
+
+# Bring up the Python services. api is exposed on http://localhost:8000;
+# /health returns {"status": "ok"}.
+docker compose up
+
+# In a separate terminal (once issue 04 lands):
+pnpm --filter @voice-ai/web dev
+```
+
+For a production-shaped stack (api + agent + nginx-served web bundle):
+
+```sh
+docker compose -f docker-compose.prod.yml up --build
+```
+
+The `livekit-server` slot in `docker-compose.prod.yml` is commented out and is wired in issue 05.
+
 ## Layout
 
 ```

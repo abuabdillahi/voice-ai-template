@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "echo \"web: dev stub (Vite wired up in issue 04)\"",
-    "build": "echo \"web: build stub\"",
+    "build": "mkdir -p dist && cp index.html dist/",
     "lint": "eslint . --max-warnings 0",
     "test": "echo \"web: test stub (vitest wired up alongside the SPA in issue 04)\"",
     "typecheck": "tsc --noEmit"

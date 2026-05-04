@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "echo \"api: dev stub (uvicorn wired up in issue 04)\"",
+    "dev": "uv run uvicorn api.main:app --reload --port 8000",
     "build": "echo \"api: no build task\"",
     "lint": "uv run ruff check . && uv run ruff format --check .",
     "format": "uv run ruff format .",

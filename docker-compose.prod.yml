@@ -1,0 +1,63 @@
+# Production compose stack.
+#
+# Adds the web (nginx) tier to the api + agent services and stubs out a
+# self-hosted livekit-server slot. The livekit-server block is commented
+# out — issue 05 wires the real LiveKit configuration. Until then,
+# bringing up prod is api + agent + web only.
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: voice-ai/api:prod
+    env_file:
+      - .env
+    ports:
+      - '8000:8000'
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: .
+      dockerfile: apps/agent/Dockerfile
+    image: voice-ai/agent:prod
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: voice-ai/web:prod
+    ports:
+      - '80:80'
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # livekit-server:
+  #   # Self-hosted LiveKit. Wired up in issue 05 (voice loop tracer).
+  #   image: livekit/livekit-server:latest
+  #   command: --dev --bind 0.0.0.0
+  #   env_file:
+  #     - .env
+  #   ports:
+  #     - "7880:7880"   # signalling (WebSocket)
+  #     - "7881:7881"   # TCP fallback
+  #     - "7882:7882/udp"  # UDP RTP
+  #   restart: unless-stopped
