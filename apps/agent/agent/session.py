@@ -433,13 +433,17 @@ def _resolve_supabase_token(participant: Any) -> str | None:
 
 
 def _wire_supabase_token_refresh(
-    participant: Any,
+    room: Any,
     deps: _SessionDeps,
     log: Any,
 ) -> None:
     """Mutate ``deps.supabase_access_token`` whenever the frontend pushes a fresh JWT.
 
-    LiveKit's ``Participant`` exposes an ``attributes_changed`` event.
+    livekit-rtc dispatches participant attribute updates as a Room
+    event (``participant_attributes_changed``), not on the participant
+    object itself. The handler signature is
+    ``(changed_attrs: dict[str, str], participant: RemoteParticipant)``.
+
     When the frontend's Supabase client refreshes its access token it
     re-pushes ``setAttributes({supabase_access_token: <new>})``; we
     pick that up here and write it into the session deps so persistence
@@ -450,7 +454,9 @@ def _wire_supabase_token_refresh(
     the same posture we had before this fix.
     """
 
-    def _on_changed(changed_attrs: dict[str, str], _participant: Any = None) -> None:
+    def _on_changed(changed_attrs: Any, _participant: Any = None) -> None:
+        if not isinstance(changed_attrs, dict):
+            return
         new_token = changed_attrs.get(SUPABASE_TOKEN_ATTRIBUTE)
         if not isinstance(new_token, str) or not new_token:
             return
@@ -460,7 +466,7 @@ def _wire_supabase_token_refresh(
         log.info("agent.supabase_token.refreshed")
 
     try:
-        participant.on("attributes_changed", _on_changed)
+        room.on("participant_attributes_changed", _on_changed)
     except Exception as exc:  # noqa: BLE001 — best-effort subscription
         log.warning("agent.supabase_token.refresh_wire_failed", error=str(exc))
 
@@ -679,7 +685,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # every persistence and tool-dispatch path sees the new value on
     # its next call. Without this, sessions over the Supabase JWT TTL
     # (1h by default) start emitting PGRST303 "JWT expired".
-    _wire_supabase_token_refresh(participant, deps, log)
+    _wire_supabase_token_refresh(ctx.room, deps, log)
 
     log.info(
         "agent.session.ready",
