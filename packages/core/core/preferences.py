@@ -34,25 +34,17 @@ _TABLE = "user_preferences"
 # ---------------------------------------------------------------------------
 # Recognised-key catalogue.
 # ---------------------------------------------------------------------------
-# Issue 10 promotes a small set of keys from "anything the agent saves
-# via set_preference" to "keys the settings UI surfaces explicitly".
-# Settings-page writes flow through ``validate_preference`` so an
-# unknown key or an invalid value is rejected at the API edge rather
-# than silently stored. The agent's free-form path through
-# ``core.tools.preferences.set_preference`` is unchanged — it does not
-# call ``validate_preference``, deliberately, so the agent can save
-# arbitrary user-stated facts (favourite_color, dietary_restrictions,
-# anything else) without us having to extend this table first. The UI
-# is the only caller bound by this catalogue.
-#
-# The frontend mirrors these constants in TypeScript
-# (``apps/web/src/lib/voice-options.ts``); both lists are kept in
-# alphabetical order so a diff lines up review-by-eye.
+# Two write paths reach this table. The validated path —
+# ``PUT /preferences/{key}`` — runs values through
+# ``validate_preference`` so an unknown key or an out-of-list value is
+# rejected at the API edge rather than silently stored. The agent's
+# free-form path through ``core.tools.preferences.set_preference`` is
+# deliberately unvalidated, so the agent can save arbitrary
+# user-stated facts (favourite_color, dietary_restrictions, anything
+# else) without us having to extend this catalogue first.
 
 #: OpenAI Realtime voice ids the assistant can speak in. Sourced from
-#: the OpenAI Realtime API documentation. Updating this list is a
-#: deliberate template-edit action: a downstream fork that adds a new
-#: voice should add it here *and* in the TS mirror.
+#: the OpenAI Realtime API documentation.
 OPENAI_REALTIME_VOICES: tuple[str, ...] = (
     "alloy",
     "ash",

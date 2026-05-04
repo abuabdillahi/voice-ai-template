@@ -26,16 +26,6 @@ Every voice conversation is persisted as a `conversations` row plus one `message
 
 Audio recordings are explicitly **out of scope** per the PRD — only the text transcripts are persisted. RLS on both `conversations` and `messages` enforces user isolation at the database level.
 
-## Settings
-
-A `/settings` page (auth-required) exposes the preference keys the user is most likely to change directly:
-
-- **Preferred name** — text input. The agent reads it at session start and is instructed to address the user by that name.
-- **Voice** — `Select` listing the OpenAI Realtime voices the worker can speak in (`alloy`, `ash`, `ballad`, `coral`, `echo`, `sage`, `shimmer`, `verse`). The worker picks up the chosen voice on the next conversation.
-- **Sign out** — calls `supabase.auth.signOut()` and redirects to `/sign-in`.
-
-Saves go through `PUT /preferences/{key}`, which validates the value via `core.preferences.validate_preference` so unknown keys or out-of-list voices are rejected at the API edge. The frontend's voice list lives at `apps/web/src/lib/voice-options.ts` and mirrors the core constants — both move together when adding a voice.
-
 ## Getting started
 
 ### Prerequisites

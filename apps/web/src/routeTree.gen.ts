@@ -10,7 +10,6 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SignInRouteImport } from './routes/sign-in'
-import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as HistoryIdRouteImport } from './routes/history.$id'
@@ -18,11 +17,6 @@ import { Route as HistoryIdRouteImport } from './routes/history.$id'
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HistoryRoute = HistoryRouteImport.update({
@@ -44,14 +38,12 @@ const HistoryIdRoute = HistoryIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/history': typeof HistoryRouteWithChildren
-  '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/history/$id': typeof HistoryIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/history': typeof HistoryRouteWithChildren
-  '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/history/$id': typeof HistoryIdRoute
 }
@@ -59,22 +51,20 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/history': typeof HistoryRouteWithChildren
-  '/settings': typeof SettingsRoute
   '/sign-in': typeof SignInRoute
   '/history/$id': typeof HistoryIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/history' | '/settings' | '/sign-in' | '/history/$id'
+  fullPaths: '/' | '/history' | '/sign-in' | '/history/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/history' | '/settings' | '/sign-in' | '/history/$id'
-  id: '__root__' | '/' | '/history' | '/settings' | '/sign-in' | '/history/$id'
+  to: '/' | '/history' | '/sign-in' | '/history/$id'
+  id: '__root__' | '/' | '/history' | '/sign-in' | '/history/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   HistoryRoute: typeof HistoryRouteWithChildren
-  SettingsRoute: typeof SettingsRoute
   SignInRoute: typeof SignInRoute
 }
 
@@ -85,13 +75,6 @@ declare module '@tanstack/react-router' {
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof SignInRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/history': {
@@ -132,7 +115,6 @@ const HistoryRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   HistoryRoute: HistoryRouteWithChildren,
-  SettingsRoute: SettingsRoute,
   SignInRoute: SignInRoute,
 }
 export const routeTree = rootRouteImport

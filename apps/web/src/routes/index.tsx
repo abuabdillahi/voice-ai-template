@@ -29,9 +29,6 @@ function HomeRoute() {
           <Button asChild variant="link" size="sm">
             <Link to="/history">History</Link>
           </Button>
-          <Button asChild variant="link" size="sm">
-            <Link to="/settings">Settings</Link>
-          </Button>
           <Button
             variant="ghost"
             size="sm"

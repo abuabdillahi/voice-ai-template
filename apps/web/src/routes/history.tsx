@@ -44,9 +44,6 @@ function HistoryRoute() {
           <Button asChild variant="link" size="sm">
             <Link to="/">Talk</Link>
           </Button>
-          <Button asChild variant="link" size="sm">
-            <Link to="/settings">Settings</Link>
-          </Button>
         </nav>
       </header>
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-4 py-6">
