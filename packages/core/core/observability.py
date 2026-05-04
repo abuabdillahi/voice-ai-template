@@ -11,6 +11,14 @@ Middleware binds these for the duration of a request; emitting code
 never imports them directly — it just calls
 ``structlog.get_logger().info(...)`` and the bound context flows
 through.
+
+Issue 11 adds the per-turn metrics hook: :func:`handle_metrics_event`
+accepts a LiveKit Agents ``MetricsCollectedEvent`` and emits a single
+INFO-level log line with the numeric latency and token-count fields
+the framework exposes, plus whatever contextvars are currently bound
+(``conversation_id``, ``session_id``, ``user_id``). The agent worker
+subscribes to ``metrics_collected`` on its ``AgentSession`` and
+forwards each event here.
 """
 
 from __future__ import annotations
@@ -31,6 +39,63 @@ from structlog.contextvars import (
 from structlog.types import Processor
 
 from core.config import Settings, get_settings
+
+# Numeric/scalar fields we surface on the structured `turn_metrics`
+# log line. Different LiveKit Agents metric event types (LLM, STT,
+# TTS, EOU, RealtimeModel, VAD, Interruption) expose overlapping but
+# distinct subsets — we project whatever is present so a single log
+# format covers all of them and downstream `grep`/`jq` queries do not
+# need to special-case the metric type.
+_METRIC_NUMERIC_FIELDS: tuple[str, ...] = (
+    # Common
+    "duration",
+    "timestamp",
+    # LLM / RealtimeModel
+    "ttft",
+    "completion_tokens",
+    "prompt_tokens",
+    "prompt_cached_tokens",
+    "total_tokens",
+    "tokens_per_second",
+    "input_tokens",
+    "output_tokens",
+    # STT
+    "audio_duration",
+    "acquire_time",
+    # TTS
+    "ttfb",
+    "characters_count",
+    # EOU — the canonical TTFA sub-metrics
+    "end_of_utterance_delay",
+    "transcription_delay",
+    "on_user_turn_completed_delay",
+    # VAD
+    "idle_time",
+    "inference_duration_total",
+    "inference_count",
+    # Interruption
+    "total_duration",
+    "prediction_duration",
+    "detection_delay",
+    "num_interruptions",
+    "num_backchannels",
+    "num_requests",
+    # RealtimeModel session-level
+    "session_duration",
+)
+
+# Identity / classification fields we keep alongside the numerics so a
+# log reader can correlate a `turn_metrics` line back to its source.
+_METRIC_IDENTITY_FIELDS: tuple[str, ...] = (
+    "type",
+    "label",
+    "request_id",
+    "speech_id",
+    "segment_id",
+    "cancelled",
+    "streamed",
+    "connection_reused",
+)
 
 _CONFIGURED = False
 
@@ -111,9 +176,75 @@ def request_context(
             unbind_contextvars(*keys)
 
 
+def bind(**fields: Any) -> None:
+    """Bind arbitrary fields to the current structlog context.
+
+    Thin convenience over :func:`structlog.contextvars.bind_contextvars`
+    so callers (request-id middleware, agent session entrypoint,
+    conversation persistence) all funnel through one entrypoint and
+    `core.observability` stays the single seam for context propagation.
+    """
+    if fields:
+        bind_contextvars(**fields)
+
+
+def unbind(*keys: str) -> None:
+    """Remove the named keys from the current structlog context.
+
+    Thin convenience over :func:`structlog.contextvars.unbind_contextvars`.
+    Keys that are not currently bound are silently ignored.
+    """
+    if keys:
+        unbind_contextvars(*keys)
+
+
+def handle_metrics_event(event: Any) -> None:
+    """Emit a structured ``turn_metrics`` log line for a LiveKit metrics event.
+
+    Accepts a LiveKit Agents ``MetricsCollectedEvent`` (which wraps an
+    ``AgentMetrics`` union — LLM, STT, TTS, EOU, RealtimeModel, VAD,
+    Interruption). Projects the numeric latency and token-count fields
+    the framework exposes onto a single INFO-level log line tagged
+    ``event = "turn_metrics"``. The currently-bound contextvars
+    (``conversation_id``, ``session_id``, ``user_id``, …) flow through
+    automatically via the ``merge_contextvars`` processor.
+
+    The function never raises: a malformed or unexpected event shape
+    degrades to a warning so a metrics-pipeline bug cannot tear down a
+    live voice session.
+    """
+    log = structlog.get_logger("core.observability.metrics")
+
+    metrics = getattr(event, "metrics", event)
+    payload: dict[str, Any] = {}
+
+    for field in _METRIC_IDENTITY_FIELDS:
+        value = getattr(metrics, field, None)
+        if value is not None:
+            payload[field] = value
+
+    for field in _METRIC_NUMERIC_FIELDS:
+        value = getattr(metrics, field, None)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        payload[field] = value
+
+    metric_type = payload.pop("type", None) or type(metrics).__name__
+
+    # The first positional arg becomes the structlog ``event`` key in
+    # the rendered JSON line, so a `grep "turn_metrics"` is enough to
+    # pull every per-turn metric out of the worker's stdout.
+    log.info("turn_metrics", metric_type=metric_type, **payload)
+
+
 __all__ = [
+    "bind",
     "bind_request_context",
     "clear_request_context",
+    "handle_metrics_event",
     "request_context",
     "setup_logging",
+    "unbind",
 ]
