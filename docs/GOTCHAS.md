@@ -21,13 +21,14 @@ Each entry: **symptom (verbatim error)** → **cause** → **fix (commit ref)**.
 ### Agent crashes on dispatch with `badly formed hexadecimal UUID string`
 
 **Symptom:**
+
 ```
 ValueError: badly formed hexadecimal UUID string
   File ".../session.py", line ~115, in _resolve_user_from_participant
     return User(id=UUID(identity), email=name)
 ```
 
-**Cause:** `ctx.token_claims()` returns the **agent's own** join claims (identity is auto-generated like `agent-AJ_…`), not the user's. UUID parse fails. Even when it does parse, the agent's metadata is empty — the Supabase token rides on the *user's* token.
+**Cause:** `ctx.token_claims()` returns the **agent's own** join claims (identity is auto-generated like `agent-AJ_…`), not the user's. UUID parse fails. Even when it does parse, the agent's metadata is empty — the Supabase token rides on the _user's_ token.
 
 **Fix:** `await ctx.wait_for_participant()` to get the connecting user, then read identity + metadata from the participant. (Commit `cc19c9a`.)
 
@@ -186,10 +187,12 @@ A code-only change → `docker compose restart`. A change to `pyproject.toml` (a
 ### Integration tests fail with `FileNotFoundError` on a migration SQL file
 
 **Symptom:**
+
 ```
 FileNotFoundError: [Errno 2] No such file or directory:
   '<repo>/packages/supabase/migrations/0001_user_preferences.sql'
 ```
+
 …and similar for `0000_init.sql`, `0002_conversations.sql`, `0003_mem0_memories.sql`.
 
 **Cause:** The three RLS integration tests under `packages/core/tests/integration/` anchored the migrations directory with `Path(__file__).resolve().parents[3]`. From `packages/core/tests/integration/<file>.py` that resolves to `packages/`, so the tests probe `packages/supabase/migrations/...`. The migrations live at the **repo root**, `./supabase/migrations/`, so the correct index is `parents[4]`. CI did not catch this because there was no pytest job — the unit and integration suites were never run automatically. The combination of the two failures meant the integration suite was effectively dark from the day issue 09 landed.
@@ -199,6 +202,7 @@ FileNotFoundError: [Errno 2] No such file or directory:
 ### Integration tests fail with `testcontainers-ryuk-... is already in use`
 
 **Symptom:**
+
 ```
 docker.errors.APIError: 409 Client Error ... Conflict
   ("Conflict. The container name "/testcontainers-ryuk-<uuid>" is already in use ...")
@@ -211,15 +215,18 @@ docker.errors.APIError: 409 Client Error ... Conflict
 ### `type "vector" does not exist` in the mem0 integration test
 
 **Symptom:**
+
 ```
 psycopg.errors.UndefinedObject: type "vector" does not exist
 LINE 1: ...m0_memories (id, vector, payload) values ($1, $2::vector, $3...
 ```
+
 Or, after qualifying the cast: `psycopg.errors.InsufficientPrivilege: permission denied for schema extensions`.
 
 **Cause:** The migration installs pgvector under the `extensions` schema (`create extension ... with schema "extensions"`). Production Supabase configures the runtime roles' `search_path` to include `extensions` and grants `USAGE` on the schema. The plain Postgres testcontainer does neither, so an unqualified `%s::vector` cast can't resolve the type, and even a qualified `%s::extensions.vector` is blocked by schema permissions.
 
 **Fix in `test_memory_with_mem0.py`:**
+
 1. Qualify the cast in `_insert_memory` as `%s::extensions.vector` so it doesn't depend on `search_path`. (Setting `SET LOCAL search_path` per-session looked like the right fix but didn't take effect under the test's `SET LOCAL ROLE authenticated` flow — couldn't isolate why; the qualified cast is bulletproof regardless.)
 2. `grant usage on schema extensions to authenticated` in the bootstrap so the role can resolve the qualified type.
 

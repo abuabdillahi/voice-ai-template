@@ -121,6 +121,7 @@ The template uses Supabase for auth, Postgres, and (later) pgvector. Two flavour
    ```
 
    JWT verification uses the project's JWKS endpoint at `{SUPABASE_URL}/auth/v1/.well-known/jwks.json` — no `JWT_SECRET` required. (The legacy `SUPABASE_ANON_KEY` env var is still accepted as an alias for the publishable key, so `.env` files cloned before the 2026 rename keep working.)
+
 3. (Optional) In **Authentication → Providers → Email** disable "Confirm email" if you want sign-ups to work without an SMTP server.
 
 ### Option B — Supabase local (self-hosted via the CLI)
