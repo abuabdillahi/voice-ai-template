@@ -29,6 +29,9 @@ export default [
       '**/coverage/**',
       'pnpm-lock.yaml',
       'uv.lock',
+      // Generated artifacts — committed for offline builds but not authored by hand.
+      '**/routeTree.gen.ts',
+      '**/api/types.gen.ts',
     ],
   },
   js.configs.recommended,

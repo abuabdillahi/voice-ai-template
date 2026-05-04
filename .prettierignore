@@ -17,3 +17,9 @@ uv.lock
 
 # Issue-tracker scratch space — managed by agent skills, not formatters
 .scratch/
+
+# Generated files — committed for offline builds but not authored by hand
+**/routeTree.gen.ts
+**/api/types.gen.ts
+apps/api/openapi.json
+.tmp/

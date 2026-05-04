@@ -67,13 +67,23 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 show_error_codes = true
 pretty = true
+explicit_package_bases = true
+namespace_packages = true
 exclude = [
     "^\\.venv/",
     "^\\.uv-cache/",
     "^node_modules/",
     "^dist/",
     "^build/",
+    "tests/",
 ]
+
+# Tests: run mypy against each test tree separately so the duplicate
+# `conftest.py` modules across packages do not collide. The pre-push
+# hook invokes these targeted runs.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+ignore_missing_imports = true
 
 # Empty stub packages (no source yet) — keep strict mode but tolerate the
 # absence of typed bodies. Per-package overrides will be tightened as real

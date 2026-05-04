@@ -7,7 +7,7 @@
     "build": "echo \"agent: no build task\"",
     "lint": "uv run ruff check . && uv run ruff format --check .",
     "format": "uv run ruff format .",
-    "test": "uv run pytest -m \"not integration\"",
+    "test": "bash -c 'uv run pytest -m \"not integration\"; rc=$?; [ $rc -eq 0 ] || [ $rc -eq 5 ]'",
     "typecheck": "uv run mypy ."
   }
 }

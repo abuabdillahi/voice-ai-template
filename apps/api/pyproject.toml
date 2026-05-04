@@ -9,6 +9,12 @@ dependencies = [
     "uvicorn[standard]>=0.32",
 ]
 
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8.0",
+]
+
 [tool.uv.sources]
 core = { workspace = true }
 
@@ -18,3 +24,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["api"]
+
+[tool.pytest.ini_options]
+# Override the workspace-level testpaths so this package only runs its
+# own tests; otherwise running `pnpm --filter @voice-ai/api test` from
+# this directory would also collect every other package's suite.
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "integration: marks tests as integration (deselect with '-m \"not integration\"')",
+]

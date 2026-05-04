@@ -22,6 +22,8 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 
 COPY apps/web apps/web
 
+# `pnpm gen:api` is not run here — `apps/web/src/api/types.gen.ts` is
+# committed and regenerated explicitly via the workspace script.
 RUN pnpm --filter @voice-ai/web build
 
 # ---------- Stage 2: runtime ----------

@@ -19,8 +19,13 @@ node_modules/
 .turbo/
 *.tsbuildinfo
 
+# Vite writes a timestamped sidecar for the config when bundling — never committed.
+vite.config.ts.timestamp-*.mjs
+vite.config.js.timestamp-*.mjs
+
 # Local tool caches
 .uv-cache/
+.tmp/
 
 # Build outputs
 dist/

@@ -1,5 +1,18 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "UV_CACHE_DIR",
+    "TMPDIR",
+    "SUPABASE_URL",
+    "SUPABASE_ANON_KEY",
+    "SUPABASE_JWT_SECRET",
+    "VITE_SUPABASE_URL",
+    "VITE_SUPABASE_ANON_KEY",
+    "VITE_API_URL",
+    "CORS_ORIGINS",
+    "LOG_LEVEL",
+    "ENVIRONMENT"
+  ],
   "tasks": {
     "dev": {
       "cache": false,

@@ -6,7 +6,7 @@ The full specification lives at [`.scratch/voice-ai-template/PRD.md`](./.scratch
 
 ## Status
 
-Foundation only. The runtime applications have not been built yet — current state is the workspace skeleton, with apps and packages as empty stubs. Subsequent issues add tooling, Docker, auth, the voice loop, tools, memory, and persistence in that order.
+Foundation + auth tracer. The workspace skeleton, tooling, Docker, and the Supabase auth slice (sign-in, `/me`, JWT verification, generated TS types) are in place. Subsequent issues add the voice loop, tools, memory, and persistence.
 
 ## Getting started
 
@@ -86,6 +86,46 @@ docker compose -f docker-compose.prod.yml up --build
 ```
 
 The `livekit-server` slot in `docker-compose.prod.yml` is commented out and is wired in issue 05.
+
+## Auth setup
+
+The template uses Supabase for auth, Postgres, and (later) pgvector. Two flavours are supported:
+
+### Option A — Supabase Cloud (zero-setup, free tier)
+
+1. Create a project at <https://supabase.com>.
+2. From **Project Settings → API** copy the **Project URL**, **anon public key**, and **JWT Secret** (under "JWT Settings"). Paste them into `.env`:
+
+   ```
+   SUPABASE_URL=https://<ref>.supabase.co
+   SUPABASE_ANON_KEY=<anon-public-key>
+   SUPABASE_JWT_SECRET=<jwt-secret>
+
+   VITE_SUPABASE_URL=https://<ref>.supabase.co
+   VITE_SUPABASE_ANON_KEY=<anon-public-key>
+   ```
+
+3. (Optional) In **Authentication → Providers → Email** disable "Confirm email" if you want sign-ups to work without an SMTP server.
+
+### Option B — Supabase local (self-hosted via the CLI)
+
+1. Install the [Supabase CLI](https://supabase.com/docs/guides/cli).
+2. From the repo root run `supabase start`. The CLI prints the local URL, anon key, and JWT secret — paste them into `.env` and the matching `VITE_SUPABASE_*` keys.
+3. Apply the bundled migrations: `supabase db reset`.
+
+### Generating the typed API client
+
+The frontend's `src/api/types.gen.ts` is generated from the FastAPI OpenAPI schema. Regenerate it whenever a route's request or response shape changes:
+
+```sh
+# In one terminal, with .env populated:
+pnpm --filter @voice-ai/api dev
+
+# In another:
+pnpm --filter @voice-ai/web gen:api
+```
+
+The script reads `apps/api/openapi.json` (committed for offline builds) and writes `apps/web/src/api/types.gen.ts`.
 
 ## Layout
 

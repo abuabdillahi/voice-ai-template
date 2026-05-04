@@ -1,16 +1,11 @@
-"""FastAPI HTTP backend entrypoint.
+"""ASGI entry point.
 
-Exposes a minimal `/health` endpoint so that container orchestrators and
-local docker compose stacks can verify the service is alive. The richer
-HTTP surface (auth, conversation routes, etc.) arrives in subsequent issues.
+`uvicorn api.main:app` keeps working — the factory lives in
+:mod:`api.app` so tests can construct a fresh instance with overrides.
 """
 
-from fastapi import FastAPI
+from __future__ import annotations
 
-app = FastAPI(title="voice-ai api", version="0.0.0")
+from api.app import create_app
 
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    """Liveness probe. Returns 200 with a static payload."""
-    return {"status": "ok"}
+app = create_app()
