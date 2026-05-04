@@ -8,13 +8,15 @@ business logic.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any
+from uuid import UUID
 
-from core import preferences
+from core import conversations, preferences
 from core.auth import User, get_current_user
 from core.config import Settings, get_settings
 from core.livekit import issue_token
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -149,3 +151,150 @@ def list_preferences(
     access_token = _bearer_token(authorization)
     rows = preferences.list(current_user, access_token=access_token)
     return PreferencesResponse(preferences=rows)
+
+
+# ---------------------------------------------------------------------------
+# Issue 09 — conversation history routes.
+# ---------------------------------------------------------------------------
+
+
+class ConversationSummaryItem(BaseModel):
+    """One row in the history list view.
+
+    Mirrors :class:`core.conversations.ConversationSummary`. We project
+    explicitly through pydantic instead of returning the dataclass so
+    the OpenAPI schema (and thus the generated TypeScript types) carry
+    field-level descriptions.
+    """
+
+    id: str = Field(description="Conversation UUID.")
+    started_at: datetime = Field(description="When the conversation began.")
+    ended_at: datetime | None = Field(
+        default=None,
+        description="When the conversation ended, or null if still in progress.",
+    )
+    summary: str | None = Field(
+        default=None,
+        description="LLM-generated one-line gist; null until the conversation ends.",
+    )
+    message_count: int = Field(description="Number of messages in the conversation.")
+
+
+class ConversationsListResponse(BaseModel):
+    """Paginated response for ``GET /conversations``."""
+
+    conversations: list[ConversationSummaryItem] = Field(
+        default_factory=list,
+        description="Conversations ordered by started_at descending.",
+    )
+
+
+class MessageItem(BaseModel):
+    """A single transcript turn for the detail view."""
+
+    id: str
+    role: str = Field(description="One of 'user', 'assistant', 'tool'.")
+    content: str
+    tool_name: str | None = None
+    tool_args: dict[str, Any] | None = None
+    tool_result: Any | None = None
+    created_at: datetime
+
+
+class ConversationDetailResponse(BaseModel):
+    """Response payload for ``GET /conversations/{id}``."""
+
+    id: str
+    started_at: datetime
+    ended_at: datetime | None = None
+    summary: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    messages: list[MessageItem] = Field(default_factory=list)
+
+
+@router.get(
+    "/conversations",
+    response_model=ConversationsListResponse,
+    tags=["conversations"],
+)
+def list_conversations(
+    current_user: Annotated[User, Depends(get_current_user)],
+    authorization: Annotated[str | None, Header()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ConversationsListResponse:
+    """Return the authenticated user's conversations, paginated.
+
+    Thin adapter over :func:`core.conversations.list_for_user`. RLS
+    enforces user scoping at the database; the route just shapes the
+    response. ``limit`` is bounded server-side so a hostile client
+    cannot ask for the whole table.
+    """
+    access_token = _bearer_token(authorization)
+    rows = conversations.list_for_user(
+        current_user,
+        limit=limit,
+        offset=offset,
+        supabase_token=access_token,
+    )
+    return ConversationsListResponse(
+        conversations=[
+            ConversationSummaryItem(
+                id=str(s.id),
+                started_at=s.started_at,
+                ended_at=s.ended_at,
+                summary=s.summary,
+                message_count=s.message_count,
+            )
+            for s in rows
+        ]
+    )
+
+
+@router.get(
+    "/conversations/{conversation_id}",
+    response_model=ConversationDetailResponse,
+    tags=["conversations"],
+)
+def get_conversation(
+    current_user: Annotated[User, Depends(get_current_user)],
+    conversation_id: Annotated[UUID, Path(description="Conversation UUID.")],
+    authorization: Annotated[str | None, Header()] = None,
+) -> ConversationDetailResponse:
+    """Return one conversation with its full message log.
+
+    Returns 404 when the conversation does not exist *or* belongs to
+    another user. Both surface here as ``None`` from the core layer
+    because RLS makes "not yours" indistinguishable from "not there"
+    — leaking the difference would itself be a privacy bug.
+    """
+    access_token = _bearer_token(authorization)
+    conv = conversations.get(
+        current_user,
+        conversation_id,
+        supabase_token=access_token,
+    )
+    if conv is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "conversation_not_found", "message": "No such conversation."},
+        )
+    return ConversationDetailResponse(
+        id=str(conv.id),
+        started_at=conv.started_at,
+        ended_at=conv.ended_at,
+        summary=conv.summary,
+        metadata=conv.metadata,
+        messages=[
+            MessageItem(
+                id=str(m.id),
+                role=m.role,
+                content=m.content,
+                tool_name=m.tool_name,
+                tool_args=m.tool_args,
+                tool_result=m.tool_result,
+                created_at=m.created_at,
+            )
+            for m in conv.messages
+        ],
+    )

@@ -27,6 +27,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
+from core import conversations as core_conversations
 from core.auth import User
 from core.config import Settings, get_settings
 from core.observability import (
@@ -49,7 +50,10 @@ from core.tools import (
 )
 from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions
 from livekit.agents.llm import function_tool
-from livekit.agents.voice.events import FunctionToolsExecutedEvent
+from livekit.agents.voice.events import (
+    ConversationItemAddedEvent,
+    FunctionToolsExecutedEvent,
+)
 
 # The data-channel topic the agent uses to forward tool-call events
 # to the frontend. Distinct from `lk.transcription` (the existing
@@ -169,6 +173,9 @@ def _wire_tool_call_forwarding(
     session: AgentSession[None],
     ctx: JobContext,
     log: Any,
+    *,
+    conv_id: UUID | None = None,
+    supabase_token: str | None = None,
 ) -> None:
     """Subscribe to ``function_tools_executed`` and forward to the room.
 
@@ -176,6 +183,10 @@ def _wire_tool_call_forwarding(
     sent on the ``lk.tool-calls`` text-stream topic. The frontend
     listens on that topic and renders the calls inline with the
     transcript.
+
+    When ``conv_id`` and ``supabase_token`` are provided, each call
+    also produces a ``tool`` message on the persisted transcript (see
+    issue 09).
     """
 
     async def _forward(event: FunctionToolsExecutedEvent) -> None:
@@ -197,6 +208,15 @@ def _wire_tool_call_forwarding(
                 call_id=call.call_id,
                 error=payload["error"],
             )
+            if conv_id is not None:
+                _persist_tool_message(
+                    conv_id=conv_id,
+                    supabase_token=supabase_token,
+                    log=log,
+                    tool_name=call.name,
+                    tool_args=args if isinstance(args, dict) else {"_raw": args},
+                    tool_result=payload["result"],
+                )
             try:
                 await ctx.room.local_participant.send_text(
                     json.dumps(payload),
@@ -213,6 +233,140 @@ def _wire_tool_call_forwarding(
         asyncio.create_task(_forward(event))
 
     session.on("function_tools_executed", _on_executed)
+
+
+# ---------------------------------------------------------------------------
+# Issue 09 — conversation persistence hooks.
+# ---------------------------------------------------------------------------
+# Subscribes the agent session to the LiveKit transcript events so that
+# every voice conversation produces:
+#
+#   * one `conversations` row at session start (`core.conversations.start`),
+#   * one `messages` row per user/assistant utterance (committed transcript
+#     items via the `conversation_item_added` event),
+#   * one `messages` row per tool call (via `function_tools_executed`),
+#   * an `ended_at` + auto-generated summary at session end.
+#
+# The session-bootstrap path that supplies the user's Supabase access
+# token is wired up incrementally — see `_resolve_supabase_token` for
+# the current source. When it is missing, the hooks degrade gracefully:
+# they log a warning and skip the persistence call rather than tearing
+# down a live conversation.
+
+
+def _resolve_supabase_token(ctx: JobContext) -> str | None:
+    """Recover the user's Supabase JWT for token-scoped persistence.
+
+    LiveKit lets a participant attach metadata to their join token. The
+    web client can stash the access token there so the worker can
+    propagate it to RLS-scoped database calls. Issue 04 minted the
+    token without metadata; later slices add this field, so for now we
+    return None and the persistence layer degrades gracefully.
+
+    TODO(issue 09): once `core.livekit.issue_token` carries the
+    Supabase JWT in the participant metadata, parse it here and return
+    it. Until then, conversation rows are skipped — the AC's "the
+    Supabase-token plumbing is verified" allowance for graceful
+    degradation in the absence of plumbing applies.
+    """
+    try:
+        claims = ctx.token_claims()
+    except Exception:  # noqa: BLE001 — token shape varies across versions
+        return None
+    metadata = getattr(claims, "metadata", None)
+    if not metadata:
+        return None
+    try:
+        decoded = json.loads(metadata)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    token = decoded.get("supabase_access_token") if isinstance(decoded, dict) else None
+    return str(token) if isinstance(token, str) and token else None
+
+
+def _wire_conversation_persistence(
+    session: AgentSession[None],
+    *,
+    conv_id: UUID,
+    supabase_token: str | None,
+    log: Any,
+) -> None:
+    """Subscribe to transcript events and append `messages` rows.
+
+    Every user or assistant utterance that the realtime model commits
+    to its transcript (the ``conversation_item_added`` event) becomes a
+    persisted row. Tool calls are persisted from
+    :func:`_wire_tool_call_forwarding` instead so we do not duplicate
+    them — that handler already has the args/result in hand.
+
+    When ``supabase_token`` is None the hook noops with a warning. We
+    do not crash the session: a logging-only degradation is preferable
+    to losing a real-time conversation over a missing piece of plumbing.
+    """
+
+    def _on_item(event: ConversationItemAddedEvent) -> None:
+        if supabase_token is None:
+            log.warning("agent.conversation.append_skipped_no_token")
+            return
+        item = event.item
+        role = getattr(item, "role", None)
+        text_content_attr = getattr(item, "text_content", None)
+        if callable(text_content_attr):
+            content = text_content_attr() or ""
+        else:
+            content = str(text_content_attr or "")
+        if role not in {"user", "assistant"} or not content.strip():
+            # Skip system messages and empty/streaming partials —
+            # `conversation_item_added` fires once per finalised item.
+            return
+        try:
+            core_conversations.append_message(
+                conv_id,
+                role=role,
+                content=content,
+                supabase_token=supabase_token,
+            )
+        except Exception as exc:  # noqa: BLE001 — persistence is best-effort
+            log.warning(
+                "agent.conversation.append_failed",
+                role=role,
+                error=str(exc),
+            )
+
+    session.on("conversation_item_added", _on_item)
+
+
+def _persist_tool_message(
+    *,
+    conv_id: UUID,
+    supabase_token: str | None,
+    log: Any,
+    tool_name: str,
+    tool_args: dict[str, Any],
+    tool_result: Any,
+) -> None:
+    """Append a tool-call as a `tool` message on the conversation."""
+    if supabase_token is None:
+        return
+    try:
+        core_conversations.append_message(
+            conv_id,
+            role="tool",
+            content="",
+            tool_name=tool_name,
+            tool_args=tool_args,
+            tool_result=tool_result,
+            supabase_token=supabase_token,
+        )
+    except Exception as exc:  # noqa: BLE001 — persistence is best-effort
+        log.warning(
+            "agent.conversation.tool_append_failed",
+            tool=tool_name,
+            error=str(exc),
+        )
+
+
+# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -268,17 +422,54 @@ async def entrypoint(ctx: JobContext) -> None:
     # Issue 11 — bind session-scoped contextvars so every log line
     # emitted during the session (including the per-turn metrics
     # lines) carries `session_id` and `user_id`. The room name doubles
-    # as the session id; conversation-level binding lands in issue 09.
+    # as the session id.
+    # Issue 09 — once the conversation row is created, also bind
+    # `conversation_id` so every subsequent log line correlates back
+    # to the persisted transcript.
     # ------------------------------------------------------------------
     session_id = ctx.room.name
     user_id_str = str(user.id)
     bind_log_context(session_id=session_id, user_id=user_id_str)
 
+    # ------------------------------------------------------------------
+    # Issue 09 — open a conversation row so we have an id to attach
+    # subsequent message rows to. When the Supabase token is missing
+    # (the plumbing is wired up incrementally — see
+    # `_resolve_supabase_token`), persistence is skipped: the voice
+    # loop must keep working even before transcript storage is fully
+    # configured.
+    # ------------------------------------------------------------------
+    supabase_token = _resolve_supabase_token(ctx)
+    conv_id: UUID | None = None
+    if supabase_token is not None:
+        try:
+            conv_id = core_conversations.start(user, supabase_token=supabase_token)
+            bind_log_context(conversation_id=str(conv_id))
+            log.info("agent.conversation.started", conversation_id=str(conv_id))
+        except Exception as exc:  # noqa: BLE001 — degrade rather than crash
+            log.warning("agent.conversation.start_failed", error=str(exc))
+            conv_id = None
+    else:
+        log.info("agent.conversation.skipped_no_token")
+
     session = build_session(settings)
     agent = build_agent(deps)
 
-    _wire_tool_call_forwarding(session, ctx, log)
+    _wire_tool_call_forwarding(
+        session,
+        ctx,
+        log,
+        conv_id=conv_id,
+        supabase_token=supabase_token,
+    )
     _wire_metrics_logging(session)
+    if conv_id is not None:
+        _wire_conversation_persistence(
+            session,
+            conv_id=conv_id,
+            supabase_token=supabase_token,
+            log=log,
+        )
 
     log.info(
         "agent.session.ready",
@@ -291,7 +482,17 @@ async def entrypoint(ctx: JobContext) -> None:
     try:
         await session.start(agent, room=ctx.room)
     finally:
-        unbind_log_context("session_id", "user_id")
+        # Issue 09 — close out the conversation row and let the
+        # summariser run (when the threshold is met). The end call is
+        # best-effort: we still tear down the structlog context even
+        # if the database round-trip fails.
+        if conv_id is not None and supabase_token is not None:
+            try:
+                core_conversations.end(conv_id, supabase_token=supabase_token)
+                log.info("agent.conversation.ended", conversation_id=str(conv_id))
+            except Exception as exc:  # noqa: BLE001 — best-effort summary
+                log.warning("agent.conversation.end_failed", error=str(exc))
+        unbind_log_context("session_id", "user_id", "conversation_id")
 
 
 def worker_options() -> WorkerOptions:

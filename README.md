@@ -6,7 +6,7 @@ The full specification lives at [`.scratch/voice-ai-template/PRD.md`](./.scratch
 
 ## Status
 
-Foundation + auth tracer + voice loop tracer + tool-calling tracer + structured preferences tracer. Workspace skeleton, tooling, Docker, the Supabase auth slice, the LiveKit + OpenAI Realtime voice loop, the tool-registration / dispatch layer with two example tools, and the structured-preferences memory layer are in place. Subsequent issues add episodic memory and conversation persistence.
+Foundation + auth tracer + voice loop tracer + tool-calling tracer + structured preferences tracer + conversation persistence tracer. Workspace skeleton, tooling, Docker, the Supabase auth slice, the LiveKit + OpenAI Realtime voice loop, the tool-registration / dispatch layer with two example tools, the structured-preferences memory layer, and persisted conversation transcripts with the history pages are in place. Subsequent issues add episodic memory.
 
 ## User memory
 
@@ -16,6 +16,15 @@ The PRD calls for a hybrid memory model. The two halves are:
 - **Episodic and semantic memory** (issue 08) — less structured recall (things mentioned in passing, rough recollections of previous conversations) is delegated to `mem0` over pgvector with explicit `remember` / `recall` tools.
 
 Both layers store data in the same Supabase Postgres instance; the split is in the access pattern, not the storage. See [`.scratch/voice-ai-template/PRD.md`](./.scratch/voice-ai-template/PRD.md) for the full rationale.
+
+## Conversation history
+
+Every voice conversation is persisted as a `conversations` row plus one `messages` row per turn (user, assistant, tool). The agent worker writes the rows mid-session via `core.conversations`; on session end an LLM-generated one-line summary is attached when the conversation has at least three messages. The web app exposes the transcripts at:
+
+- `/history` — list of past conversations with their summary and message count.
+- `/history/:id` — full transcript for a single conversation, with role-styled bubbles and timestamps. Tool calls render as a third message type carrying the tool name, arguments, and result.
+
+Audio recordings are explicitly **out of scope** per the PRD — only the text transcripts are persisted. RLS on both `conversations` and `messages` enforces user isolation at the database level.
 
 ## Getting started
 

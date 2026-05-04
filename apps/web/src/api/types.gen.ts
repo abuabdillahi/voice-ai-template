@@ -92,10 +92,131 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Conversations
+         * @description Return the authenticated user's conversations, paginated.
+         *
+         *     Thin adapter over :func:`core.conversations.list_for_user`. RLS
+         *     enforces user scoping at the database; the route just shapes the
+         *     response. ``limit`` is bounded server-side so a hostile client
+         *     cannot ask for the whole table.
+         */
+        get: operations["list_conversations_conversations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Conversation
+         * @description Return one conversation with its full message log.
+         *
+         *     Returns 404 when the conversation does not exist *or* belongs to
+         *     another user. Both surface here as ``None`` from the core layer
+         *     because RLS makes "not yours" indistinguishable from "not there"
+         *     — leaking the difference would itself be a privacy bug.
+         */
+        get: operations["get_conversation_conversations__conversation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ConversationDetailResponse
+         * @description Response payload for ``GET /conversations/{id}``.
+         */
+        ConversationDetailResponse: {
+            /** Id */
+            id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Summary */
+            summary?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Messages */
+            messages?: components["schemas"]["MessageItem"][];
+        };
+        /**
+         * ConversationSummaryItem
+         * @description One row in the history list view.
+         *
+         *     Mirrors :class:`core.conversations.ConversationSummary`. We project
+         *     explicitly through pydantic instead of returning the dataclass so
+         *     the OpenAPI schema (and thus the generated TypeScript types) carry
+         *     field-level descriptions.
+         */
+        ConversationSummaryItem: {
+            /**
+             * Id
+             * @description Conversation UUID.
+             */
+            id: string;
+            /**
+             * Started At
+             * Format: date-time
+             * @description When the conversation began.
+             */
+            started_at: string;
+            /**
+             * Ended At
+             * @description When the conversation ended, or null if still in progress.
+             */
+            ended_at?: string | null;
+            /**
+             * Summary
+             * @description LLM-generated one-line gist; null until the conversation ends.
+             */
+            summary?: string | null;
+            /**
+             * Message Count
+             * @description Number of messages in the conversation.
+             */
+            message_count: number;
+        };
+        /**
+         * ConversationsListResponse
+         * @description Paginated response for ``GET /conversations``.
+         */
+        ConversationsListResponse: {
+            /**
+             * Conversations
+             * @description Conversations ordered by started_at descending.
+             */
+            conversations?: components["schemas"]["ConversationSummaryItem"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -155,6 +276,34 @@ export interface components {
             id: string;
             /** Email */
             email: string;
+        };
+        /**
+         * MessageItem
+         * @description A single transcript turn for the detail view.
+         */
+        MessageItem: {
+            /** Id */
+            id: string;
+            /**
+             * Role
+             * @description One of 'user', 'assistant', 'tool'.
+             */
+            role: string;
+            /** Content */
+            content: string;
+            /** Tool Name */
+            tool_name?: string | null;
+            /** Tool Args */
+            tool_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Tool Result */
+            tool_result?: unknown | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * PreferencesResponse
@@ -301,6 +450,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PreferencesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_conversations_conversations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_conversation_conversations__conversation_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description Conversation UUID. */
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationDetailResponse"];
                 };
             };
             /** @description Validation Error */
