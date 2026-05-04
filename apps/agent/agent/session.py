@@ -569,6 +569,17 @@ async def entrypoint(ctx: JobContext) -> None:
         unbind_log_context("session_id", "user_id", "conversation_id")
 
 
+AGENT_NAME = "voice-ai-assistant"
+"""The name LiveKit dispatch uses to route rooms to this worker.
+
+livekit-agents 1.x deprecated implicit/automatic dispatch — workers
+that register without an ``agent_name`` no longer pick up rooms by
+default. Tokens minted by ``core.livekit.issue_token`` request this
+name via a ``RoomAgentDispatch`` entry so a connecting browser
+triggers a dispatch immediately.
+"""
+
+
 def worker_options() -> WorkerOptions:
     """Build the :class:`WorkerOptions` the CLI uses to register the worker.
 
@@ -580,6 +591,7 @@ def worker_options() -> WorkerOptions:
     settings = get_settings()
     return WorkerOptions(
         entrypoint_fnc=entrypoint,
+        agent_name=AGENT_NAME,
         ws_url=settings.livekit_url,
         api_key=settings.livekit_api_key,
         api_secret=settings.livekit_api_secret,

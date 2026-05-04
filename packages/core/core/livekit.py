@@ -31,12 +31,18 @@ from __future__ import annotations
 import json
 from datetime import timedelta
 
-from livekit.api import AccessToken, VideoGrants
+from livekit.api import AccessToken, RoomAgentDispatch, RoomConfiguration, VideoGrants
 
 from core.auth import User
 from core.config import Settings, get_settings
 
 DEFAULT_TOKEN_TTL_SECONDS = 15 * 60
+
+# Must match the `agent_name` declared in
+# ``apps/agent/agent/session.py::worker_options``. livekit-agents 1.x
+# requires explicit named dispatch — without this entry on the token,
+# the agent worker registers but never receives a job for the room.
+AGENT_NAME = "voice-ai-assistant"
 
 
 def issue_token(
@@ -53,6 +59,10 @@ def issue_token(
     set required for two-way audio between the user and the agent.
     Identity is the Supabase user id (string form); display name is
     the user's email so the LiveKit dashboard is readable.
+
+    The token also carries a ``RoomConfiguration`` that requests the
+    agent worker by name on first participant join — this is what
+    triggers the agent's ``entrypoint`` to fire.
     """
     settings = settings or get_settings()
 
@@ -64,6 +74,10 @@ def issue_token(
         can_publish_data=True,
     )
 
+    room_config = RoomConfiguration(
+        agents=[RoomAgentDispatch(agent_name=AGENT_NAME)],
+    )
+
     builder = (
         AccessToken(
             api_key=settings.livekit_api_key,
@@ -72,6 +86,7 @@ def issue_token(
         .with_identity(str(user.id))
         .with_name(user.email)
         .with_grants(grants)
+        .with_room_config(room_config)
         .with_ttl(timedelta(seconds=ttl_seconds))
     )
 
@@ -83,4 +98,4 @@ def issue_token(
     return builder.to_jwt()
 
 
-__all__ = ["DEFAULT_TOKEN_TTL_SECONDS", "issue_token"]
+__all__ = ["AGENT_NAME", "DEFAULT_TOKEN_TTL_SECONDS", "issue_token"]
