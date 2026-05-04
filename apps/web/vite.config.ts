@@ -9,6 +9,9 @@ import { fileURLToPath } from 'node:url';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
+  // Read VITE_* env vars from the monorepo root .env (one source of truth
+  // alongside SUPABASE_*, LIVEKIT_*, OPENAI_API_KEY consumed by api/agent).
+  envDir: resolve(__dirname, '../..'),
   plugins: [
     TanStackRouterVite({
       routesDirectory: './src/routes',
