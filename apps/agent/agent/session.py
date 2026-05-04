@@ -297,7 +297,7 @@ def _wire_tool_call_forwarding(
     log: Any,
     *,
     conv_id: UUID | None = None,
-    supabase_token: str | None = None,
+    deps: _SessionDeps | None = None,
 ) -> None:
     """Subscribe to ``function_tools_executed`` and forward to the room.
 
@@ -306,9 +306,13 @@ def _wire_tool_call_forwarding(
     listens on that topic and renders the calls inline with the
     transcript.
 
-    When ``conv_id`` and ``supabase_token`` are provided, each call
-    also produces a ``tool`` message on the persisted transcript (see
-    issue 09).
+    When ``conv_id`` is provided and ``deps.supabase_access_token`` is
+    populated, each call also produces a ``tool`` message on the
+    persisted transcript (see issue 09). The token is read from
+    ``deps`` at event time rather than captured at wire time so a
+    mid-session token refresh (frontend pushes a new JWT via
+    participant attributes when Supabase auto-refreshes) is picked up
+    by every subsequent persist call.
     """
 
     async def _forward(event: FunctionToolsExecutedEvent) -> None:
@@ -330,10 +334,10 @@ def _wire_tool_call_forwarding(
                 call_id=call.call_id,
                 error=payload["error"],
             )
-            if conv_id is not None:
+            if conv_id is not None and deps is not None:
                 _persist_tool_message(
                     conv_id=conv_id,
-                    supabase_token=supabase_token,
+                    supabase_token=deps.supabase_access_token,
                     log=log,
                     tool_name=call.name,
                     tool_args=args if isinstance(args, dict) else {"_raw": args},
@@ -376,14 +380,30 @@ def _wire_tool_call_forwarding(
 # down a live conversation.
 
 
+SUPABASE_TOKEN_ATTRIBUTE = "supabase_access_token"
+"""Participant attribute key the frontend writes the live Supabase JWT to.
+
+Attributes are mutable (LiveKit Cloud relays attribute changes to other
+participants in real time), so the frontend pushes a refreshed token
+here on Supabase's ``TOKEN_REFRESHED`` event and the agent picks it up
+without having to reissue the LiveKit token. This is what keeps RLS
+writes working across the Supabase access-token TTL (1h by default).
+"""
+
+
 def _resolve_supabase_token(participant: Any) -> str | None:
     """Recover the user's Supabase JWT for token-scoped persistence.
 
-    LiveKit lets a participant attach metadata to their join token. The
-    API stashes the user's Supabase access token there at mint time
-    (see :func:`core.livekit.issue_token`) so the worker can propagate
-    it to RLS-scoped database calls. Wire shape:
-    ``{"supabase_access_token": "<jwt>"}`` JSON-encoded.
+    Two sources are checked, in order:
+
+    1. The participant attribute ``supabase_access_token`` — the live,
+       mutable channel the frontend writes both at connect time and on
+       every Supabase ``TOKEN_REFRESHED`` event. This is the path that
+       survives the Supabase JWT's 1h TTL across long sessions.
+    2. The participant's join-token metadata blob (the legacy path —
+       see :func:`core.livekit.issue_token`). Wire shape:
+       ``{"supabase_access_token": "<jwt>"}`` JSON-encoded. Retained as
+       a fallback for older clients that do not yet push attributes.
 
     Reads from the remote participant — the agent's own
     ``ctx.token_claims()`` carries the agent's empty metadata, not the
@@ -391,10 +411,16 @@ def _resolve_supabase_token(participant: Any) -> str | None:
 
     The graceful-degrade fallback (return ``None``) is kept as defence
     in depth — older clients, manual ``livekit dispatch`` invocations,
-    and tests that mint tokens without metadata still produce a
-    workable session, just one where the persistence hooks log a
-    warning and skip the write rather than tearing down the call.
+    and tests that mint tokens without metadata or attributes still
+    produce a workable session, just one where the persistence hooks
+    log a warning and skip the write rather than tearing down the call.
     """
+    attributes = getattr(participant, "attributes", None)
+    if isinstance(attributes, dict):
+        attr_token = attributes.get(SUPABASE_TOKEN_ATTRIBUTE)
+        if isinstance(attr_token, str) and attr_token:
+            return attr_token
+
     metadata = getattr(participant, "metadata", None)
     if not metadata:
         return None
@@ -406,11 +432,44 @@ def _resolve_supabase_token(participant: Any) -> str | None:
     return str(token) if isinstance(token, str) and token else None
 
 
+def _wire_supabase_token_refresh(
+    participant: Any,
+    deps: _SessionDeps,
+    log: Any,
+) -> None:
+    """Mutate ``deps.supabase_access_token`` whenever the frontend pushes a fresh JWT.
+
+    LiveKit's ``Participant`` exposes an ``attributes_changed`` event.
+    When the frontend's Supabase client refreshes its access token it
+    re-pushes ``setAttributes({supabase_access_token: <new>})``; we
+    pick that up here and write it into the session deps so persistence
+    and tool dispatch see the new value on the very next call.
+
+    Defensive: failure to subscribe is logged-only — the session keeps
+    running on the original (possibly soon-to-expire) token, which is
+    the same posture we had before this fix.
+    """
+
+    def _on_changed(changed_attrs: dict[str, str], _participant: Any = None) -> None:
+        new_token = changed_attrs.get(SUPABASE_TOKEN_ATTRIBUTE)
+        if not isinstance(new_token, str) or not new_token:
+            return
+        if new_token == deps.supabase_access_token:
+            return
+        deps.supabase_access_token = new_token
+        log.info("agent.supabase_token.refreshed")
+
+    try:
+        participant.on("attributes_changed", _on_changed)
+    except Exception as exc:  # noqa: BLE001 — best-effort subscription
+        log.warning("agent.supabase_token.refresh_wire_failed", error=str(exc))
+
+
 def _wire_conversation_persistence(
     session: AgentSession[None],
     *,
     conv_id: UUID,
-    supabase_token: str | None,
+    deps: _SessionDeps,
     log: Any,
 ) -> None:
     """Subscribe to transcript events and append `messages` rows.
@@ -421,13 +480,22 @@ def _wire_conversation_persistence(
     :func:`_wire_tool_call_forwarding` instead so we do not duplicate
     them — that handler already has the args/result in hand.
 
-    When ``supabase_token`` is None the hook noops with a warning. We
-    do not crash the session: a logging-only degradation is preferable
-    to losing a real-time conversation over a missing piece of plumbing.
+    The Supabase access token is read from ``deps`` at event time, not
+    captured here at wire time. The Supabase JWT has a 1h TTL; the
+    frontend pushes a refreshed token via the participant attribute
+    ``supabase_access_token`` on Supabase's ``TOKEN_REFRESHED`` event,
+    and the entrypoint mutates ``deps.supabase_access_token`` when the
+    attribute changes. Reading-per-call is what makes that refresh
+    visible to long-running sessions.
+
+    When the token is None the hook noops with a warning. We do not
+    crash the session: a logging-only degradation is preferable to
+    losing a real-time conversation over a missing piece of plumbing.
     """
 
     def _on_item(event: ConversationItemAddedEvent) -> None:
-        if supabase_token is None:
+        token = deps.supabase_access_token
+        if token is None:
             log.warning("agent.conversation.append_skipped_no_token")
             return
         item = event.item
@@ -446,7 +514,7 @@ def _wire_conversation_persistence(
                 conv_id,
                 role=role,
                 content=content,
-                supabase_token=supabase_token,
+                supabase_token=token,
             )
         except Exception as exc:  # noqa: BLE001 — persistence is best-effort
             log.warning(
@@ -594,16 +662,24 @@ async def entrypoint(ctx: JobContext) -> None:
         ctx,
         log,
         conv_id=conv_id,
-        supabase_token=supabase_token,
+        deps=deps,
     )
     _wire_metrics_logging(session)
     if conv_id is not None:
         _wire_conversation_persistence(
             session,
             conv_id=conv_id,
-            supabase_token=supabase_token,
+            deps=deps,
             log=log,
         )
+
+    # Issue 14 — keep the Supabase token fresh. The frontend pushes a
+    # new JWT to the `supabase_access_token` participant attribute on
+    # Supabase's `TOKEN_REFRESHED` event; we mutate `deps` in-place so
+    # every persistence and tool-dispatch path sees the new value on
+    # its next call. Without this, sessions over the Supabase JWT TTL
+    # (1h by default) start emitting PGRST303 "JWT expired".
+    _wire_supabase_token_refresh(participant, deps, log)
 
     log.info(
         "agent.session.ready",

@@ -4,6 +4,7 @@ import { ChevronRight, Mic, MicOff, PhoneCall, PhoneOff } from 'lucide-react';
 import { Room, RoomEvent, ConnectionState, Track, type RemoteTrack } from 'livekit-client';
 
 import { apiFetch } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import { useLivekitTranscript, type TranscriptEntry } from '@/lib/livekit-transcript';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -80,6 +81,30 @@ export function TalkPage() {
         track.detach().forEach((el) => el.remove());
       });
       await lkRoom.connect(info.url, info.token);
+
+      // Push the live Supabase access token as a participant attribute
+      // so the agent worker can read it for RLS-scoped writes. The
+      // agent reads `supabase_access_token` via `_resolve_supabase_token`
+      // and listens for attribute changes; below we re-push on every
+      // Supabase TOKEN_REFRESHED event so long sessions stay
+      // authenticated past the 1h JWT TTL.
+      const pushToken = async (): Promise<void> => {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (token) {
+          await lkRoom.localParticipant.setAttributes({ supabase_access_token: token });
+        }
+      };
+      await pushToken();
+      const { data: authSub } = supabase.auth.onAuthStateChange((event) => {
+        if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
+          void pushToken();
+        }
+      });
+      lkRoom.once(RoomEvent.Disconnected, () => {
+        authSub.subscription.unsubscribe();
+      });
+
       return { room: lkRoom, info };
     },
     onMutate: () => {

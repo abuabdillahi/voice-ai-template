@@ -11,18 +11,41 @@ const { connectMock, disconnectMock, setMicMock, RoomCtor } = vi.hoisted(() => {
   const connect = vi.fn().mockResolvedValue(undefined);
   const disconnect = vi.fn().mockResolvedValue(undefined);
   const setMic = vi.fn().mockResolvedValue(undefined);
+  const setAttributes = vi.fn().mockResolvedValue(undefined);
   const Ctor = vi.fn().mockImplementation(() => ({
     connect,
     disconnect,
     on: vi.fn(),
     off: vi.fn(),
+    once: vi.fn(),
     localParticipant: {
       identity: 'me',
       setMicrophoneEnabled: setMic,
+      setAttributes,
     },
   }));
-  return { connectMock: connect, disconnectMock: disconnect, setMicMock: setMic, RoomCtor: Ctor };
+  return {
+    connectMock: connect,
+    disconnectMock: disconnect,
+    setMicMock: setMic,
+    RoomCtor: Ctor,
+  };
 });
+
+// Stub the Supabase client surface the talk page reaches into when
+// pushing the access token to LiveKit attributes.
+vi.mock('@/lib/supabase', () => ({
+  supabase: {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: { access_token: 'fake-jwt' } },
+      }),
+      onAuthStateChange: vi.fn().mockReturnValue({
+        data: { subscription: { unsubscribe: vi.fn() } },
+      }),
+    },
+  },
+}));
 
 vi.mock('livekit-client', async () => {
   const actual = await vi.importActual<typeof import('livekit-client')>('livekit-client');
