@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "echo \"web: dev stub (Vite wired up in issue 04)\"",
-    "build": "echo \"web: build stub\"",
+    "build": "mkdir -p dist && cp index.html dist/",
     "lint": "echo \"web: lint stub (real config arrives in issue 02)\"",
     "test": "echo \"web: test stub\"",
     "typecheck": "echo \"web: typecheck stub\""

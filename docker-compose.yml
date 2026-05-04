@@ -1,0 +1,48 @@
+# Development compose stack.
+#
+# Brings up the Python services (api + agent) for local end-to-end smoke
+# testing. The web frontend deliberately runs OUTSIDE compose during
+# development: Vite needs HMR over a websocket directly to the host, and
+# wrapping it in a container breaks the dev-loop without buying us
+# anything (the production deployment is a static-asset nginx image,
+# defined in docker-compose.prod.yml).
+#
+# Usage:
+#   docker compose up           # api + agent
+#   pnpm --filter @voice-ai/web dev   # web, in a separate terminal
+#
+# Both services build from the repo root so they can reach the workspace
+# root pyproject.toml, uv.lock, and packages/core.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: voice-ai/api:dev
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: .
+      dockerfile: apps/agent/Dockerfile
+    image: voice-ai/agent:dev
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  # web: intentionally omitted in dev compose — see comment above.

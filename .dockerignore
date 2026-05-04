@@ -1,0 +1,40 @@
+# Repo-root .dockerignore. Used by api/agent/web image builds whose
+# build context is the repo root (so the workspace root pyproject/uv.lock
+# and shared packages/core are available to the COPY directives).
+
+node_modules
+**/node_modules
+
+.venv
+**/.venv
+
+dist
+**/dist
+build
+**/build
+
+.git
+.gitignore
+.github
+
+.env
+.env.local
+**/.env
+**/.env.local
+
+.uv-cache
+.turbo
+**/.turbo
+
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+
+.scratch
+.worktrees
+
+# IDE / OS
+.DS_Store
+.vscode
+.idea
