@@ -58,23 +58,31 @@ class _RecordingMem0:
         self,
         messages: str,
         *,
-        user_id: str,
+        user_id: str | None = None,
+        filters: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Any:
-        self.add_calls.append((messages, {"user_id": user_id, "metadata": metadata}))
+        self.add_calls.append(
+            (messages, {"user_id": user_id, "filters": filters, "metadata": metadata})
+        )
         return None
 
     def search(
         self,
         query: str,
         *,
-        user_id: str,
+        filters: dict[str, Any] | None = None,
         limit: int = 5,
     ) -> Any:
-        self.search_calls.append((query, {"user_id": user_id, "limit": limit}))
+        self.search_calls.append((query, {"filters": filters, "limit": limit}))
         return self.search_response
 
-    def get_all(self, *, user_id: str, limit: int = 10) -> Any:  # noqa: ARG002
+    def get_all(
+        self,
+        *,
+        filters: dict[str, Any] | None = None,  # noqa: ARG002
+        limit: int = 10,  # noqa: ARG002
+    ) -> Any:
         return []
 
 
@@ -108,12 +116,21 @@ async def test_remember_then_recall_dispatches_through_mem0() -> None:
         assert isinstance(recalled, str)
         assert "Spanish" in recalled
 
-        # Both mem0 calls landed with the right arguments.
+        # Both mem0 calls landed with the right arguments. mem0 ≥2.0
+        # routes the per-user scope through `filters`; we also pass
+        # `user_id` for backward compat across versions.
         assert fake.add_calls == [
-            ("I'm learning Spanish", {"user_id": str(deps.user.id), "metadata": None}),
+            (
+                "I'm learning Spanish",
+                {
+                    "user_id": str(deps.user.id),
+                    "filters": {"user_id": str(deps.user.id)},
+                    "metadata": None,
+                },
+            ),
         ]
         assert fake.search_calls == [
-            ("Spanish", {"user_id": str(deps.user.id), "limit": 5}),
+            ("Spanish", {"filters": {"user_id": str(deps.user.id)}, "limit": 5}),
         ]
     finally:
         core_memory.set_client_for_tests(None)

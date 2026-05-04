@@ -56,8 +56,9 @@ class AuthError(Exception):
 
 def _jwks_url(settings: Settings) -> str:
     """Resolve the JWKS endpoint, honouring the optional override."""
-    if settings.supabase_jwks_url:
-        return settings.supabase_jwks_url
+    override = settings.supabase_jwks_url
+    if override:
+        return str(override)
     return f"{settings.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
 
 

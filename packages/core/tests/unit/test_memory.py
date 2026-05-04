@@ -45,29 +45,32 @@ class _FakeMem0:
         self,
         messages: str,
         *,
-        user_id: str,
+        user_id: str | None = None,
+        filters: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Any:
-        self.add_calls.append((messages, {"user_id": user_id, "metadata": metadata}))
+        self.add_calls.append(
+            (messages, {"user_id": user_id, "filters": filters, "metadata": metadata})
+        )
         return self.add_response
 
     def search(
         self,
         query: str,
         *,
-        user_id: str,
+        filters: dict[str, Any] | None = None,
         limit: int = 5,
     ) -> Any:
-        self.search_calls.append((query, {"user_id": user_id, "limit": limit}))
+        self.search_calls.append((query, {"filters": filters, "limit": limit}))
         return self.search_response
 
     def get_all(
         self,
         *,
-        user_id: str,
+        filters: dict[str, Any] | None = None,
         limit: int = 10,
     ) -> Any:
-        self.get_all_calls.append({"user_id": user_id, "limit": limit})
+        self.get_all_calls.append({"filters": filters, "limit": limit})
         return self.get_all_response
 
 
@@ -89,10 +92,11 @@ def test_remember_calls_mem0_add_with_str_user_id(fake_client: _FakeMem0) -> Non
     assert len(fake_client.add_calls) == 1
     content, kwargs = fake_client.add_calls[0]
     assert content == "I'm learning Spanish"
-    # The user id is passed as a string, not a UUID — mem0 stringifies
-    # everything before writing to the JSONB payload, so passing UUID
-    # objects produces inconsistent serialisations across versions.
+    # mem0 ≥2.0 wants the per-user scope inside `filters`. We also pass
+    # `user_id` for backward-compat with versions that still wire the
+    # top-level kwarg to the JSONB payload.
     assert kwargs["user_id"] == str(_USER.id)
+    assert kwargs["filters"] == {"user_id": str(_USER.id)}
 
 
 def test_recall_returns_list_of_memory_dataclasses(fake_client: _FakeMem0) -> None:
@@ -107,9 +111,9 @@ def test_recall_returns_list_of_memory_dataclasses(fake_client: _FakeMem0) -> No
         Memory(id="abc", content="is learning Spanish", score=0.91, metadata=None),
         Memory(id="def", content="has a daughter named Maya", score=0.42, metadata=None),
     ]
-    # The query, user_id, and limit must reach mem0 unchanged.
+    # The query, user-scoped filter, and limit must reach mem0 unchanged.
     assert fake_client.search_calls == [
-        ("languages", {"user_id": str(_USER.id), "limit": 3}),
+        ("languages", {"filters": {"user_id": str(_USER.id)}, "limit": 3}),
     ]
 
 
@@ -140,13 +144,13 @@ def test_list_recent_uses_default_limit_of_ten(fake_client: _FakeMem0) -> None:
     assert [m.content for m in results] == ["first", "second"]
     # `score` is None for listings (mem0's `get_all` does not score).
     assert all(m.score is None for m in results)
-    assert fake_client.get_all_calls == [{"user_id": str(_USER.id), "limit": 10}]
+    assert fake_client.get_all_calls == [{"filters": {"user_id": str(_USER.id)}, "limit": 10}]
 
 
 def test_list_recent_respects_explicit_limit(fake_client: _FakeMem0) -> None:
     fake_client.get_all_response = []
     core_memory.list_recent(_USER, limit=3)
-    assert fake_client.get_all_calls == [{"user_id": str(_USER.id), "limit": 3}]
+    assert fake_client.get_all_calls == [{"filters": {"user_id": str(_USER.id)}, "limit": 3}]
 
 
 def test_set_client_for_tests_clears_when_none() -> None:

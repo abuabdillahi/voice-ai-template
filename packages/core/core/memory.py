@@ -63,7 +63,8 @@ class MemoryClientProtocol(Protocol):
         self,
         messages: str,
         *,
-        user_id: str,
+        user_id: str | None = ...,
+        filters: dict[str, Any] | None = ...,
         metadata: dict[str, Any] | None = ...,
     ) -> Any: ...
 
@@ -71,14 +72,14 @@ class MemoryClientProtocol(Protocol):
         self,
         query: str,
         *,
-        user_id: str,
+        filters: dict[str, Any] | None = ...,
         limit: int = ...,
     ) -> Any: ...
 
     def get_all(
         self,
         *,
-        user_id: str,
+        filters: dict[str, Any] | None = ...,
         limit: int = ...,
     ) -> Any: ...
 
@@ -190,7 +191,7 @@ def remember(
     list of created/updated memory ids if a UI surface needed them).
     """
     client = _get_client()
-    client.add(content, user_id=str(user.id))
+    client.add(content, user_id=str(user.id), filters={"user_id": str(user.id)})
 
 
 def recall(
@@ -209,7 +210,7 @@ def recall(
     to pass ``user_id``.
     """
     client = _get_client()
-    raw = client.search(query, user_id=str(user.id), limit=limit)
+    raw = client.search(query, filters={"user_id": str(user.id)}, limit=limit)
     return [_row_to_memory(row) for row in _coerce_results(raw)]
 
 
@@ -229,7 +230,7 @@ def list_recent(
     to keep the contract honest.
     """
     client = _get_client()
-    raw = client.get_all(user_id=str(user.id), limit=limit)
+    raw = client.get_all(filters={"user_id": str(user.id)}, limit=limit)
     return [_row_to_memory(row) for row in _coerce_results(raw)]
 
 
