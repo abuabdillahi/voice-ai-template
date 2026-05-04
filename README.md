@@ -80,21 +80,19 @@ everything is wired up.
 All cross-cutting commands run through Turborepo from the repo root:
 
 ```sh
-pnpm dev            # turbo run dev      (no-ops at this stage)
+pnpm dev            # turbo run dev      (vite for web, uvicorn --reload for api, livekit-agents dev for agent)
 pnpm build          # turbo run build
 pnpm lint           # turbo run lint
 pnpm test           # turbo run test
 pnpm typecheck      # turbo run typecheck
 ```
 
-Real implementations of these scripts arrive in subsequent issues.
-
 ## Running locally
 
 The dev stack splits across two ecosystems:
 
 - **`api` and `agent`** run in Docker via compose. Both services load environment variables from a top-level `.env` file (copy `.env.example` to `.env` first).
-- **`web`** runs outside compose so Vite's HMR works directly against the host. It will be wired up in issue 04; until then `pnpm dev` is a no-op.
+- **`web`** runs outside compose so Vite's HMR works directly against the host.
 
 ```sh
 cp .env.example .env
@@ -103,7 +101,7 @@ cp .env.example .env
 # /health returns {"status": "ok"}.
 docker compose up
 
-# In a separate terminal (once issue 04 lands):
+# In a separate terminal:
 pnpm --filter @voice-ai/web dev
 ```
 
