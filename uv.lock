@@ -401,6 +401,7 @@ dependencies = [
     { name = "livekit-agents", extra = ["openai"] },
     { name = "livekit-api" },
     { name = "mem0ai" },
+    { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-jose", extra = ["cryptography"] },
@@ -410,7 +411,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "testcontainers" },
@@ -424,6 +424,7 @@ requires-dist = [
     { name = "livekit-agents", extras = ["openai"], specifier = ">=1.5.0" },
     { name = "livekit-api", specifier = ">=1.1.0" },
     { name = "mem0ai", specifier = ">=2.0.0" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3" },
@@ -433,7 +434,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "testcontainers", extras = ["postgres"], specifier = ">=4.8" },
