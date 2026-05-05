@@ -95,13 +95,13 @@ docker compose up
 pnpm --filter @voice-ai/web dev
 ```
 
-For a production-shaped stack (api + agent + nginx-served web bundle + self-hosted LiveKit):
+For a production-shaped stack (api + agent + nginx-served web bundle):
 
 ```sh
 docker compose -f docker-compose.prod.yml up --build
 ```
 
-The production compose runs `livekit/livekit-server` alongside the application services. Defaults live in `livekit.yaml`; production deployers must replace the placeholder API key/secret pair (matching `.env`) and tune the UDP RTP port range to their network plan.
+The production compose adds the nginx-served web bundle on top of the dev service graph. LiveKit itself is **not** in the compose stack — both dev and prod dial a hosted LiveKit Cloud project via `LIVEKIT_URL`. Use a separate Cloud project (or at minimum a separate API key/secret pair) for production traffic.
 
 ## Auth setup
 
@@ -136,11 +136,9 @@ The voice loop is real-time conversational audio over WebRTC, powered by LiveKit
 
 ### LiveKit
 
-LiveKit owns the media plane (signalling + RTP). The dev posture is hosted; the production posture is self-hosted in compose.
+LiveKit owns the media plane (signalling + RTP). Both dev and prod use a hosted LiveKit Cloud project — there is no self-hosted media server in this template.
 
-#### Development — LiveKit Cloud (recommended)
-
-1. Create a free project at <https://cloud.livekit.io>.
+1. Create a project at <https://cloud.livekit.io>. The free tier is sufficient for development; provision a separate project (or at minimum a separate API key/secret pair) for production traffic.
 2. From **Project Settings → Keys** copy the **API Key**, **API Secret**, and the **WebSocket URL** (`wss://<project>.livekit.cloud`). Paste them into `.env`:
 
    ```
@@ -151,15 +149,7 @@ LiveKit owns the media plane (signalling + RTP). The dev posture is hosted; the 
 
 3. The agent worker dispatches into rooms automatically; no further LiveKit dashboard configuration is needed for the demo.
 
-#### Production — self-hosted (`docker-compose.prod.yml`)
-
-The production compose file boots `livekit/livekit-server` alongside the application services. Configure it via the committed `livekit.yaml`:
-
-1. Replace the placeholder line under `keys:` with the same `LIVEKIT_API_KEY: LIVEKIT_API_SECRET` pair you set in `.env`.
-2. Adjust the UDP RTP port range (`50000-50100` by default) and TURN block to match your network. Tight NATs typically need a real TURN-over-TCP shared secret.
-3. Update `LIVEKIT_URL` in `.env` to point at the in-cluster service (`ws://livekit-server:7880`) or the public hostname behind your TLS-terminating proxy.
-
-Switching between cloud and self-hosted is a single environment-variable change from the application's perspective; nothing in `apps/api`, `apps/agent`, or `apps/web` is aware of where LiveKit lives.
+LiveKit lives behind `LIVEKIT_URL` — nothing in `apps/api`, `apps/agent`, or `apps/web` cares whether the URL points at LiveKit Cloud or a self-hosted server. A fork that needs to self-host can swap the URL and add a `livekit-server` service to the compose stack without touching application code.
 
 ### OpenAI
 

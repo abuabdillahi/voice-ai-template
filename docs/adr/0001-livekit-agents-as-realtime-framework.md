@@ -19,7 +19,7 @@ Use **LiveKit Agents** as the realtime framework, defaulting to OpenAI Realtime 
 
 The realtime model lives behind a single seam — `core.realtime.create_realtime_model(settings)` — so swapping providers (Gemini Live, an Anthropic real-time offering, a self-hosted pipeline) is a config change, not a refactor.
 
-LiveKit deployment defaults to LiveKit Cloud in the dev compose; the production compose includes a self-hosted `livekit/livekit-server` container.
+LiveKit deployment uses LiveKit Cloud in both dev and prod — the production compose stack runs only api + agent + web (nginx) and dials the hosted LiveKit URL. Self-hosting `livekit/livekit-server` remains supported (a fork only needs to flip `LIVEKIT_URL`) but is not the default posture this template ships.
 
 ## Consequences
 
@@ -27,7 +27,7 @@ LiveKit deployment defaults to LiveKit Cloud in the dev compose; the production 
 
 - Vendor-neutral at the framework layer. Swapping the realtime model is a function rewrite, not an architectural one.
 - Built-in production features: turn detection, interruption handling, noise cancellation, recording hooks, telephony via SIP.
-- Self-hostable end-to-end (LiveKit server is OSS), matching the Supabase + Docker self-host posture.
+- Self-hostable end-to-end if a fork wants it (LiveKit server is OSS); the default posture uses LiveKit Cloud to keep the prod compose small, but swapping in `livekit/livekit-server` is a `LIVEKIT_URL` change plus a compose service.
 - Industry default for production voice products in 2025–26 — recognition from any contributor.
 - ~50–100ms latency overhead vs OpenAI Realtime direct (acceptable; total TTFA still 500–800ms).
 

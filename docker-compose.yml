@@ -43,9 +43,10 @@ services:
     image: voice-ai/agent:dev
     env_file:
       - .env
-    # In dev the agent dials LiveKit Cloud (LIVEKIT_URL points at a
-    # wss://*.livekit.cloud project). Switching to a self-hosted
-    # server is a single env-var change; no service-graph change.
+    # The agent dials LiveKit Cloud (LIVEKIT_URL points at a
+    # wss://*.livekit.cloud project) in both dev and prod. The compose
+    # service graph is identical — only the LIVEKIT_URL value changes
+    # between projects.
     environment:
       LIVEKIT_URL: ${LIVEKIT_URL:?set LIVEKIT_URL in .env}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY in .env}

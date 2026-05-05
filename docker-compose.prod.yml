@@ -1,8 +1,9 @@
 # Production compose stack.
 #
-# Adds the web (nginx) tier and a self-hosted livekit-server alongside
-# the api + agent services. Application code is identical between dev
-# and prod — only the `LIVEKIT_URL` env var changes (cloud → self-host).
+# Adds the web (nginx) tier alongside the api + agent services. LiveKit
+# itself is not in the service graph — both dev and prod dial a hosted
+# LiveKit Cloud project (LIVEKIT_URL=wss://<project>.livekit.cloud) so
+# the only deployment-shape difference is the nginx web image.
 #
 # Usage:
 #   docker compose -f docker-compose.prod.yml up
@@ -27,8 +28,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    depends_on:
-      - livekit-server
     restart: unless-stopped
 
   agent:
@@ -38,8 +37,6 @@ services:
     image: voice-ai/agent:prod
     env_file:
       - .env
-    depends_on:
-      - livekit-server
     restart: unless-stopped
 
   web:
@@ -51,26 +48,4 @@ services:
       - '80:80'
     depends_on:
       - api
-    restart: unless-stopped
-
-  # Self-hosted LiveKit server.
-  #
-  # Defaults shipped in `livekit.yaml` are deliberately conservative
-  # for a template — operators tune ports, TURN credentials, and the
-  # API key/secret pair before going to production. The keys section
-  # in livekit.yaml MUST match `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`
-  # in `.env`.
-  livekit-server:
-    image: livekit/livekit-server:latest
-    command: --config /etc/livekit.yaml --bind 0.0.0.0
-    volumes:
-      - ./livekit.yaml:/etc/livekit.yaml:ro
-    ports:
-      - '7880:7880' # signalling (WebSocket / HTTP)
-      - '7881:7881' # TCP fallback for ICE
-      # UDP range for RTP — narrow this in production behind a real
-      # network plan; documented as 50000-60000 in the LiveKit docs.
-      - '50000-50100:50000-50100/udp'
-      # TURN over TCP (optional but recommended for tight networks).
-      - '5349:5349/tcp'
     restart: unless-stopped
