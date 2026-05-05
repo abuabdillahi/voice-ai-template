@@ -22,6 +22,13 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 
 COPY apps/web apps/web
 
+# Vite inlines VITE_* vars into the bundle at build time. Pass them through
+# as build args so the static assets ship with the right Supabase project.
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_PUBLISHABLE_KEY
+ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
+    VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY
+
 # `pnpm gen:api` is not run here — `apps/web/src/api/types.gen.ts` is
 # committed and regenerated explicitly via the workspace script.
 RUN pnpm --filter @voice-ai/web build
