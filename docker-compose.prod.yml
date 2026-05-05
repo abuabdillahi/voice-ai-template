@@ -16,8 +16,8 @@ services:
     image: voice-ai/api:prod
     env_file:
       - .env
-    ports:
-      - '8000:8000'
+    expose:
+      - '8000'
     healthcheck:
       test:
         - CMD
@@ -44,6 +44,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
+        VITE_API_URL: ${VITE_API_URL}
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
         VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
     image: voice-ai/web:prod
@@ -51,6 +52,9 @@ services:
       - .env
     ports:
       - '80:80'
+      - '443:443'
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
     depends_on:
       - api
     restart: unless-stopped

@@ -23,10 +23,13 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 COPY apps/web apps/web
 
 # Vite inlines VITE_* vars into the bundle at build time. Pass them through
-# as build args so the static assets ship with the right Supabase project.
+# as build args so the static assets ship with the right Supabase project
+# and api base URL.
+ARG VITE_API_URL
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_PUBLISHABLE_KEY
-ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
+ENV VITE_API_URL=$VITE_API_URL \
+    VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
     VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY
 
 # `pnpm gen:api` is not run here — `apps/web/src/api/types.gen.ts` is
@@ -36,9 +39,12 @@ RUN pnpm --filter @voice-ai/web build
 # ---------- Stage 2: runtime ----------
 FROM nginx:alpine AS runtime
 
-# Default nginx config serves /usr/share/nginx/html on port 80.
+# Custom config: TLS on 443 via mounted Cloudflare Origin Certificate,
+# /api/* reverse-proxied to the api service, SPA fallback for client
+# routes. Certs are mounted at /etc/nginx/certs by docker-compose.
+COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /workspace/apps/web/dist /usr/share/nginx/html
 
-EXPOSE 80
+EXPOSE 80 443
 
 CMD ["nginx", "-g", "daemon off;"]
