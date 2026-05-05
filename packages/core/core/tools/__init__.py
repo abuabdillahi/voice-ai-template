@@ -22,6 +22,7 @@ from __future__ import annotations
 from core.tools import examples as examples  # noqa: F401
 from core.tools import memory as memory  # noqa: F401
 from core.tools import preferences as preferences  # noqa: F401
+from core.tools import triage as triage  # noqa: F401
 from core.tools.registry import (
     ToolContext,
     ToolHandler,

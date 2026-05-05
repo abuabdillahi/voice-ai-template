@@ -6,10 +6,12 @@ import { Room, RoomEvent, ConnectionState, Track, type RemoteTrack } from 'livek
 import { apiFetch } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { useLivekitTranscript, type TranscriptEntry } from '@/lib/livekit-transcript';
+import { useLivekitTriageState } from '@/lib/livekit-triage-state';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { TriageSlots } from '@/components/triage-slots';
 import { cn } from '@/lib/utils';
 
 interface LivekitTokenResponse {
@@ -39,6 +41,7 @@ export function TalkPage() {
   const [micEnabled, setMicEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const transcript = useLivekitTranscript(room);
+  const triageSlots = useLivekitTriageState(room);
 
   // Hold a ref to the active room so cleanup on unmount can
   // disconnect even if state has not yet flushed.
@@ -185,6 +188,8 @@ export function TalkPage() {
           {error && <span className="text-sm text-[hsl(var(--destructive))]">{error}</span>}
         </CardContent>
       </Card>
+
+      <TriageSlots slots={triageSlots} />
 
       <Card className="flex-1">
         <CardHeader>

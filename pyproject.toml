@@ -49,7 +49,11 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"tests/**" = ["ARG", "B"]
+"**/tests/**" = ["ARG", "B"]
+"apps/agent/agent/session.py" = ["E501"]
+"packages/core/core/conditions.py" = ["E501"]
+"packages/core/core/safety.py" = ["E501"]
+"tests/safety/runner.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -98,8 +102,9 @@ ignore_missing_imports = true
 # ----------------------------------------------------------------------------
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["apps", "packages"]
+testpaths = ["apps", "packages", "tests"]
 markers = [
     "integration: marks tests as integration (deselect with '-m \"not integration\"')",
 ]
 addopts = "-ra"
+asyncio_mode = "auto"

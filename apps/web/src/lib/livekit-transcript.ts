@@ -2,6 +2,16 @@ import { useEffect, useState } from 'react';
 import { RoomEvent, type Room } from 'livekit-client';
 
 /**
+ * Wire shape of the `lk.triage-state` data-channel topic. The agent
+ * worker emits one of these every time `record_symptom` commits a new
+ * slot value; the frontend slot panel renders the `slots` map directly.
+ */
+export interface TriageStatePayload {
+  slots: Record<string, string>;
+  session_id: string;
+}
+
+/**
  * One line in the live transcript panel.
  *
  * The `role` distinguishes the end user's transcribed audio from the

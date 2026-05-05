@@ -112,6 +112,20 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Safety classifier ---
+    # The second layer of the red-flag detector (slice 06) is a
+    # gpt-4o-mini classifier with structured output. It reuses
+    # `openai_api_key`; the model id is configurable so a future
+    # safety-quality upgrade can swap to a different OpenAI model
+    # without code edits. See `core.safety.classify`.
+    safety_classifier_model: str = Field(
+        default="gpt-4o-mini",
+        description=(
+            "OpenAI model id used by the parallel safety classifier. "
+            "Reads `OPENAI_API_KEY`. Defaults to gpt-4o-mini."
+        ),
+    )
+
     # --- HTTP / observability ---
     cors_origins: str = Field(
         default="http://localhost:5173",

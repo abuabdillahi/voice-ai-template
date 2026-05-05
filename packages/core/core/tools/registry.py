@@ -50,6 +50,11 @@ class ToolContext:
     pre-bound with ``tool_name`` so every line a handler emits is
     correlated to the specific tool invocation.
 
+    ``session_id`` is the LiveKit room name and serves as the in-process
+    key for any per-session state a tool wants to keep — the triage
+    slot store reads it to isolate concurrent users. Defaulted to the
+    empty string for tests that build a context without a session.
+
     ``supabase_access_token`` is the user's Supabase JWT, propagated
     through to RLS-scoped database calls (see :mod:`core.preferences`).
     Optional because not every tool touches the database — and because
@@ -60,6 +65,7 @@ class ToolContext:
 
     user: User
     log: BoundLogger
+    session_id: str = ""
     supabase_access_token: str | None = None
 
 
@@ -292,6 +298,7 @@ async def dispatch(
     handler_ctx = ToolContext(
         user=ctx.user,
         log=bound_log,
+        session_id=ctx.session_id,
         supabase_access_token=ctx.supabase_access_token,
     )
 

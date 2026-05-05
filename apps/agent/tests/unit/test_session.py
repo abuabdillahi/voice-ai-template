@@ -1,20 +1,11 @@
 """Unit tests for `agent.session`.
 
-The acceptance criteria call for an integration test using LiveKit
-Agents' AgentSession test harness with a scripted realtime model. The
-1.5.x harness is available under `livekit.agents.voice.run_result`
-but the API is not yet stable across patch releases (the public test
-helpers are still flagged "evals"). To keep CI deterministic and
-fast, this slice ships unit tests that pin the entrypoint's contract:
-
-* a known system prompt,
-* an :class:`Agent` with no tools (issue 06 adds them),
-* an :class:`AgentSession` wired with the realtime model the factory
-  returns,
-* :class:`WorkerOptions` populated from the typed settings.
-
-Issue 06 (tools) introduces the harness-based test once a tool exists
-that benefits from the scripted-LLM verification.
+After the issue-01 triage pivot, this suite pins the contract for the
+educational triage system prompt and the scaffolding around it.
+``build_system_prompt`` (the personalisation helper) and the example
+session/worker wiring tests continue to apply unchanged — the helper is
+retained as kept-public-API surface (ADR 0006) but is bypassed by the
+triage entrypoint.
 """
 
 from __future__ import annotations
@@ -33,12 +24,14 @@ from livekit.agents import Agent, AgentSession, WorkerOptions
 from livekit.agents.llm import RealtimeModel
 
 
-def test_build_agent_uses_template_system_prompt() -> None:
+def test_build_agent_uses_triage_system_prompt() -> None:
     agent = build_agent()
     assert isinstance(agent, Agent)
-    # The system prompt is the only behaviour in this slice; pin it
-    # explicitly so a regression on the prompt is visible in review.
-    assert "helpful conversational assistant" in SYSTEM_PROMPT
+    # Pin the load-bearing framing so a regression on the prompt is
+    # visible in review. The full prompt-shape assertions live in
+    # `tests/integration/test_session_tools.py`.
+    assert "educational triage" in SYSTEM_PROMPT.lower()
+    assert "not a doctor" in SYSTEM_PROMPT.lower()
     assert agent.instructions == SYSTEM_PROMPT
 
 
@@ -58,8 +51,8 @@ def test_worker_options_pulls_credentials_from_settings(settings: Settings) -> N
         opts = worker_options()
     assert isinstance(opts, WorkerOptions)
     assert opts.ws_url == "wss://test.livekit.cloud"
-    assert opts.api_key == "lk-test-key"
-    assert opts.api_secret == "lk-test-secret"
+    assert opts.api_key == "lk-test-key"  # pragma: allowlist secret
+    assert opts.api_secret == "lk-test-secret"  # pragma: allowlist secret
     # And the entrypoint pointer must match the function the worker
     # is supposed to dispatch into.
     from agent.session import entrypoint

@@ -1,26 +1,21 @@
 """Integration-style tests for `agent.session` tool wiring.
 
-The acceptance criteria call for a LiveKit-Agents test-harness
-round-trip ("script `what's the weather in Berlin`, assert
-`get_weather` is dispatched"). The 1.5.x harness for end-to-end
-voice-loop scripting is still flagged as an evals tool and not stable
-across patch releases. Per the issue brief's own escape hatch
-("if the harness is too brittle, write a smaller unit test and
-document the deviation"), this test asserts the *contract* the
-harness would otherwise verify:
+After the issue-01 triage pivot, the agent registers only the tools in
+:data:`agent.session.TRIAGE_TOOL_NAMES` with the realtime model. The
+preference, memory, and example tools remain registered in the core
+registry as kept-public-API surface (see ADR 0006) and continue to
+have their own unit/integration tests; what changes here is the
+agent-level allowlist.
 
-* the agent built by :func:`build_agent` exposes both example tools,
-* each tool's schema name, description, and parameter shape match the
-  `core.tools.registry` source of truth,
-* the system prompt advertises tool availability so the realtime
-  model knows it can call them,
-* invoking a registered tool through the dispatch path (the same
-  path the LiveKit `function_tool` wrapper uses) returns a useful
-  string for the model to verbalise.
+The tests below assert the *contract* a LiveKit Agents test harness
+would otherwise verify:
 
-Together these checks prove tool-calling is wired end-to-end without
-spinning up a real WebRTC session. The harness-based test is left for
-a future slice once the upstream API stabilises.
+* the agent built by :func:`build_agent` exposes only the triage
+  allowlist tools,
+* the system prompt frames the assistant as an educational triage
+  tool, names the in-scope and out-of-scope categories, and instructs
+  the model to interview using OPQRST,
+* the data-channel topics are distinct from the transcription topic.
 """
 
 from __future__ import annotations
@@ -32,11 +27,12 @@ import structlog
 from agent.session import (
     SYSTEM_PROMPT,
     TOOL_CALLS_TOPIC,
+    TRIAGE_TOOL_NAMES,
     _SessionDeps,
     build_agent,
 )
 from core.auth import User
-from core.tools import all_tools, dispatch
+from core.tools import dispatch
 from core.tools.registry import ToolContext
 
 
@@ -47,56 +43,124 @@ def _deps() -> _SessionDeps:
     )
 
 
-def test_agent_registers_all_core_tools() -> None:
+def test_agent_registers_only_triage_allowlist_tools() -> None:
     agent = build_agent(_deps())
     registered_names = {t.info.name for t in agent.tools}  # type: ignore[union-attr]
-    expected_names = {schema.name for schema in all_tools()}
-    assert registered_names == expected_names
-    # Issue 06 tools.
-    assert "get_current_time" in registered_names
-    assert "get_weather" in registered_names
-    # Issue 07 tools — structured preferences.
-    assert "set_preference" in registered_names
-    assert "get_preference" in registered_names
+    assert registered_names == set(TRIAGE_TOOL_NAMES)
 
 
-def test_agent_tool_schemas_match_registry() -> None:
+def test_record_symptom_is_in_the_triage_allowlist() -> None:
+    """Slice 02 introduces the OPQRST `record_symptom` tool."""
+    assert "record_symptom" in TRIAGE_TOOL_NAMES
+
+
+def test_recommend_treatment_and_get_differential_are_in_the_triage_allowlist() -> None:
+    """Slice 03 introduces the grounded recommendation tools."""
+    assert "recommend_treatment" in TRIAGE_TOOL_NAMES
+    assert "get_differential" in TRIAGE_TOOL_NAMES
+
+
+def test_escalate_is_in_the_triage_allowlist() -> None:
+    """Slice 04 introduces the model-callable `escalate` tool."""
+    assert "escalate" in TRIAGE_TOOL_NAMES
+
+
+def test_system_prompt_advertises_the_safety_floor_and_escalate_tool() -> None:
+    """The model must know the server-side screen exists and that
+    `escalate` is available for cases the screen does not catch.
+    """
+    from agent.session import SYSTEM_PROMPT
+
+    lower = SYSTEM_PROMPT.lower()
+    assert "escalate" in lower
+    assert "red-flag" in lower or "red flag" in lower
+
+
+def test_system_prompt_forbids_speaking_protocols_not_from_recommend_treatment() -> None:
+    """Slice 03's load-bearing prompt rule against numerical hallucination."""
+    from agent.session import SYSTEM_PROMPT
+
+    lower = SYSTEM_PROMPT.lower()
+    assert "recommend_treatment" in lower
+    # The hard rule wording ties spoken protocols/timelines back to the
+    # tool. Phrasing variation is fine; the literal "never speak" is
+    # what we pin here.
+    assert "never speak" in lower
+
+
+def test_system_prompt_documents_confidence_threshold_for_recommend_treatment() -> None:
+    """When the differential's top score is low, the model must defer."""
+    from agent.session import SYSTEM_PROMPT
+
+    lower = SYSTEM_PROMPT.lower()
+    # The threshold is documented as 0.15 in the prompt. The model has
+    # to know the actual number so its decision is deterministic.
+    assert "0.15" in lower
+    assert "professional evaluation" in lower or "clinician visit" in lower
+
+
+def test_agent_does_not_register_preference_or_memory_or_example_tools() -> None:
+    """The triage product unregisters the template's example tools.
+
+    The modules behind these tools remain in source as kept public API
+    (ADR 0006); the assertion is on the agent's *registered* tool set.
+    """
     agent = build_agent(_deps())
-    by_name = {t.info.name: t for t in agent.tools}  # type: ignore[union-attr]
-    for schema in all_tools():
-        agent_tool = by_name[schema.name]
-        # `RawFunctionTool` carries the raw_schema we built from the
-        # registry. The agent and registry must agree on shape.
-        info = agent_tool.info
-        raw = getattr(info, "raw_schema", None)
-        assert raw is not None
-        assert raw["name"] == schema.name
-        assert raw["description"] == schema.description
-        assert raw["parameters"] == schema.parameters
+    registered_names = {t.info.name for t in agent.tools}  # type: ignore[union-attr]
+    forbidden = {
+        "set_preference",
+        "get_preference",
+        "remember",
+        "recall",
+        "get_current_time",
+        "get_weather",
+    }
+    assert registered_names.isdisjoint(forbidden)
 
 
-def test_system_prompt_announces_tools() -> None:
-    # The model only knows it can call tools if the prompt says so;
-    # this is the seam downstream developers extend when they add
-    # their own tools (see README "Adding tools").
-    assert "tools" in SYSTEM_PROMPT.lower()
-    assert "time" in SYSTEM_PROMPT.lower()
-    assert "weather" in SYSTEM_PROMPT.lower()
+def test_system_prompt_frames_the_product_as_educational_not_diagnostic() -> None:
+    lower = SYSTEM_PROMPT.lower()
+    assert "educational" in lower
+    assert "not a doctor" in lower
+    assert "not a substitute" in lower
+    # The prompt should use "may suggest" framing rather than "diagnose".
+    assert "may suggest" in lower or "what these symptoms" in lower
+
+
+def test_system_prompt_names_the_five_in_scope_conditions() -> None:
+    lower = SYSTEM_PROMPT.lower()
+    assert "carpal tunnel" in lower
+    assert "computer vision syndrome" in lower
+    assert "tension-type headache" in lower
+    # Allow either the formal name or the colloquial "text neck".
+    assert "trapezius" in lower or "text neck" in lower
+    assert "lumbar" in lower
+
+
+def test_system_prompt_names_out_of_scope_categories() -> None:
+    lower = SYSTEM_PROMPT.lower()
+    assert "medication" in lower
+    assert "mental health" in lower
+    assert "pregnan" in lower
+    assert "paediatric" in lower or "pediatric" in lower
+    assert "post-surgical" in lower or "postsurgical" in lower
+
+
+def test_system_prompt_instructs_opqrst_interview() -> None:
+    upper = SYSTEM_PROMPT.upper()
+    assert "OPQRST" in upper
+
+
+def test_system_prompt_forbids_inventing_dosages_or_numerical_specifics() -> None:
+    lower = SYSTEM_PROMPT.lower()
+    assert "never invent" in lower or "do not invent" in lower
+    assert "dosage" in lower or "medication" in lower
 
 
 def test_tool_call_topic_is_distinct_from_transcription() -> None:
     # Frontend listens to two topics; they must not collide.
     assert TOOL_CALLS_TOPIC == "lk.tool-calls"
     assert TOOL_CALLS_TOPIC != "lk.transcription"
-
-
-@pytest.mark.asyncio
-async def test_dispatch_invokes_get_current_time() -> None:
-    deps = _deps()
-    ctx = ToolContext(user=deps.user, log=deps.log)
-    result = await dispatch("get_current_time", {"timezone": "UTC"}, ctx)
-    assert isinstance(result, str)
-    assert "UTC" in result
 
 
 @pytest.mark.asyncio
