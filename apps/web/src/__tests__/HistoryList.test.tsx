@@ -33,7 +33,7 @@ vi.mock('@tanstack/react-router', () => ({
   redirect: () => null,
 }));
 
-import { HistoryList } from '@/routes/history';
+import { HistoryList } from '@/routes/history.index';
 
 function renderWithProviders(ui: React.ReactElement) {
   const client = new QueryClient({

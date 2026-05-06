@@ -568,6 +568,45 @@ def _wire_conversation_persistence(
     session.on("conversation_item_added", _on_item)
 
 
+def _wire_end_conversation_on_shutdown(
+    ctx: JobContext,
+    *,
+    conv_id: UUID,
+    deps: _SessionDeps,
+    log: Any,
+) -> None:
+    """Register `core_conversations.end` as a job-shutdown callback.
+
+    `AgentSession.start` is a setup function in livekit-agents 1.x: it
+    wires I/O, kicks off background tasks, and returns within seconds.
+    The voice loop continues until the framework fires the shutdown
+    callbacks registered on the `JobContext` (room close / participant
+    leave). Calling `end` from a `finally` block after `session.start`
+    therefore ran it BEFORE any `conversation_item_added` event had
+    persisted a turn — `_list_messages` returned zero rows and the
+    summary was never generated. Registering as a shutdown callback
+    instead defers the call to real teardown.
+
+    The callback reads `deps.supabase_access_token` at fire time so a
+    token refreshed mid-session via `_wire_supabase_token_refresh` is
+    honoured; the local token captured at session start would otherwise
+    be expired by the time a long session ended.
+    """
+
+    async def _on_shutdown() -> None:
+        token = deps.supabase_access_token
+        if token is None:
+            log.warning("agent.conversation.end_skipped_no_token")
+            return
+        try:
+            core_conversations.end(conv_id, supabase_token=token)
+            log.info("agent.conversation.ended", conversation_id=str(conv_id))
+        except Exception as exc:  # noqa: BLE001 — best-effort summary
+            log.warning("agent.conversation.end_failed", error=str(exc))
+
+    ctx.add_shutdown_callback(_on_shutdown)
+
+
 def _persist_tool_message(
     *,
     conv_id: UUID,
@@ -868,6 +907,12 @@ async def entrypoint(ctx: JobContext) -> None:
     if conv_id is not None:
         _wire_conversation_persistence(
             session,
+            conv_id=conv_id,
+            deps=deps,
+            log=log,
+        )
+        _wire_end_conversation_on_shutdown(
+            ctx,
             conv_id=conv_id,
             deps=deps,
             log=log,
