@@ -57,7 +57,7 @@ from core.observability import (
 from core.observability import (
     unbind as unbind_log_context,
 )
-from core.realtime import create_realtime_model
+from core.realtime import DEFAULT_VOICE, create_realtime_model, create_safety_tts
 from core.tools import (
     ToolContext as DomainToolContext,
 )
@@ -287,8 +287,14 @@ def build_session(
     for a future product that wants per-user voice selection.
     """
     settings = settings or get_settings()
-    model = create_realtime_model(settings, voice=voice)
-    return AgentSession[None](llm=model)
+    # Resolve the voice here — the same value goes to both factories
+    # so the realtime turns and the safety-TTS escalation script share
+    # a speaker. Realtime-only voices (marin, cedar) would error in
+    # the TTS plugin, so the default lives in the overlapping catalog.
+    chosen_voice = voice if voice is not None else DEFAULT_VOICE
+    model = create_realtime_model(settings, voice=chosen_voice)
+    tts = create_safety_tts(settings, voice=chosen_voice)
+    return AgentSession[None](llm=model, tts=tts)
 
 
 def _load_user_preferences(
@@ -605,45 +611,41 @@ async def _speak_escalation_script(
     session: AgentSession[None],
     script: str,
     log: Any,
+    *,
+    tier: str,
 ) -> None:
-    """Speak the escalation script with a realtime-mode fallback.
+    """Speak the versioned escalation script.
 
-    ``session.say(text)`` only works when the session has a TTS model
-    attached. In speech-to-speech realtime mode (the default for this
-    product — see :func:`core.realtime.create_realtime_model`) there is
-    no separate TTS pipeline and ``say`` raises with a "no TTS model"
-    error. The realtime model can still produce audio via
-    :meth:`AgentSession.generate_reply`; we constrain it with
-    ``instructions`` to read the versioned script verbatim. The model
-    *may* paraphrase by a few words — the load-bearing safety
-    properties (audit-log row, session close, scripted *content*) are
-    unchanged either way, and the spoken wording is still anchored to
-    the versioned script in :data:`core.safety._ESCALATION_SCRIPTS`.
+    The AgentSession is constructed with a TTS attached (see
+    :func:`core.realtime.create_safety_tts`) so ``session.say(text)``
+    works even though the primary LLM is the speech-to-speech realtime
+    model. The realtime model has typically already started its own
+    auto-reply for the triggering user turn by the time the safety
+    screen fires; ``session.interrupt()`` cancels that in-flight
+    response so the script's audio doesn't overlap.
 
-    Best-effort: a failure on either path is logged and swallowed.
+    On success, an ``agent.safety.script_spoken`` info log line marks
+    the moment ``say()`` was invoked — without this, the TTS metrics
+    log line (emitted on a different logger) is the only timeline
+    anchor and is awkward to correlate.
+
+    Best-effort: failures on either step are logged and swallowed —
+    the audit-log row and session close still run.
     """
+    interrupt = getattr(session, "interrupt", None)
+    if callable(interrupt):
+        try:
+            maybe = interrupt()
+            if hasattr(maybe, "__await__"):
+                await maybe
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            log.warning("agent.safety.interrupt_failed", error=str(exc))
+
     try:
         await session.say(script)
-        return
-    except Exception as exc:  # noqa: BLE001 — TTS missing is the realtime-mode case
-        log.warning("agent.safety.say_failed", error=str(exc))
-
-    generate_reply = getattr(session, "generate_reply", None)
-    if not callable(generate_reply):
-        log.warning("agent.safety.generate_reply_unavailable")
-        return
-    try:
-        instructions = (
-            "Speak the following message exactly, word for word, and stop. "
-            "Do not add anything before or after. Do not paraphrase. "
-            "Do not continue the conversation after speaking it.\n\n"
-            f"{script}"
-        )
-        maybe = generate_reply(instructions=instructions)
-        if hasattr(maybe, "__await__"):
-            await maybe
+        log.info("agent.safety.script_spoken", tier=tier)
     except Exception as exc:  # noqa: BLE001 — best-effort speak
-        log.warning("agent.safety.generate_reply_failed", error=str(exc))
+        log.warning("agent.safety.say_failed", error=str(exc))
 
 
 def _wire_safety_screen(
@@ -720,7 +722,7 @@ def _wire_safety_screen(
             utterance=text,
         )
         script = core_safety.escalation_script_for(result.tier)
-        await _speak_escalation_script(session, script, log)
+        await _speak_escalation_script(session, script, log, tier=result.tier.value)
         try:
             closer = getattr(session, "aclose", None) or getattr(session, "close", None)
             if callable(closer):

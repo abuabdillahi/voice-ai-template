@@ -44,6 +44,21 @@ def test_build_session_wires_realtime_model(settings: Settings) -> None:
     assert isinstance(session.llm, RealtimeModel)
 
 
+def test_build_session_attaches_tts_for_safety_say(settings: Settings) -> None:
+    """Realtime mode has no TTS pipeline; safety escalations need ``say()``.
+
+    Attaching a TTS to the AgentSession lets the safety hook play the
+    versioned escalation script verbatim via ``session.say(script)``
+    instead of the brittle ``generate_reply(instructions=...)`` fallback,
+    which raced with the realtime model's in-flight reply.
+    """
+    session = build_session(settings)
+    assert session.tts is not None, (
+        "AgentSession must have a TTS attached so session.say() works in "
+        "realtime mode for safety escalations"
+    )
+
+
 def test_worker_options_pulls_credentials_from_settings(settings: Settings) -> None:
     # Patch get_settings so worker_options uses the fixture rather
     # than the (unset) process environment.
@@ -114,3 +129,53 @@ def test_build_session_passes_voice_to_factory(settings: Settings) -> None:
         # The most-recent call should be ours; assert the kwarg shape.
         kwargs = factory.call_args.kwargs
         assert kwargs.get("voice") == "sage"
+
+
+def test_build_session_passes_same_voice_to_realtime_and_tts(settings: Settings) -> None:
+    """Realtime and TTS must use the same voice or escalations sound jarring.
+
+    The realtime model speaks the everyday turns and the TTS speaks the
+    safety script. If they use different voices, the safety alert
+    sounds like it comes from a different system. Both factories must
+    receive the same ``voice`` value.
+    """
+    real_session = build_session(settings)  # any RealtimeModel + TTS for return value
+    with (
+        patch("agent.session.create_realtime_model") as rt_factory,
+        patch("agent.session.create_safety_tts") as tts_factory,
+    ):
+        rt_factory.return_value = real_session.llm
+        tts_factory.return_value = real_session.tts
+        build_session(settings, voice="sage")
+        assert rt_factory.call_args.kwargs.get("voice") == "sage"
+        assert tts_factory.call_args.kwargs.get("voice") == "sage"
+
+
+def test_build_session_default_voice_overlaps_both_catalogs(settings: Settings) -> None:
+    """The default voice must exist in both realtime and TTS catalogs.
+
+    Realtime-only voices (``marin``, ``cedar``) cannot be used by the
+    OpenAI TTS plugin and would error at speak time. The default has
+    to come from the overlapping set: alloy, ash, ballad, coral, sage,
+    shimmer, verse.
+    """
+    real_session = build_session(settings)
+    with (
+        patch("agent.session.create_realtime_model") as rt_factory,
+        patch("agent.session.create_safety_tts") as tts_factory,
+    ):
+        rt_factory.return_value = real_session.llm
+        tts_factory.return_value = real_session.tts
+        build_session(settings)  # no explicit voice
+        rt_voice = rt_factory.call_args.kwargs.get("voice")
+        tts_voice = tts_factory.call_args.kwargs.get("voice")
+        assert rt_voice == tts_voice, (
+            "default voice must be the same on both factories; "
+            f"got realtime={rt_voice!r}, tts={tts_voice!r}"
+        )
+        overlapping = {"alloy", "ash", "ballad", "coral", "sage", "shimmer", "verse"}
+        assert rt_voice in overlapping, (
+            f"default voice {rt_voice!r} must come from the overlapping set "
+            f"that both gpt-realtime and gpt-4o-mini-tts support; got "
+            f"none of {overlapping}"
+        )

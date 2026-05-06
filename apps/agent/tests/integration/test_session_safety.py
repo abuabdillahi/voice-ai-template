@@ -496,41 +496,52 @@ async def test_classifier_failure_falls_back_to_regex_only(
 
 
 class _RealtimeFakeSession:
-    """Fake session that mimics OpenAI Realtime — `say` raises, `generate_reply` works.
+    """Fake session that mimics realtime mode with a TTS attached.
 
-    Mirrors the production failure mode the live deploy hit: realtime
-    mode has no TTS pipeline so ``session.say`` raises immediately. The
-    safety hook must fall back to ``generate_reply(instructions=...)``
-    with the versioned script.
+    With a TTS attached at AgentSession construction (see
+    :func:`core.realtime.create_safety_tts`), ``session.say(text)``
+    works in realtime mode and plays the script verbatim. But the
+    realtime model has typically already started its own auto-reply
+    by the time the safety screen fires, so the hook must call
+    ``interrupt()`` before ``say()`` — otherwise the script audio
+    overlaps the model's reply.
+
+    This fake records call order and asserts that contract.
     """
 
     def __init__(self) -> None:
         self.listeners: dict[str, list[Any]] = {}
-        self.replies: list[dict[str, Any]] = []
+        self.said: list[str] = []
+        self.calls: list[str] = []
         self.closed = False
 
     def on(self, event: str, handler: Any) -> None:
         self.listeners.setdefault(event, []).append(handler)
 
-    async def say(self, _text: str) -> None:
-        raise RuntimeError(
-            "trying to generate speech from text without a TTS model or a "
-            "RealtimeSession that supports say(); add a TTS model to "
-            "AgentSession to enable say()"
-        )
+    async def interrupt(self) -> None:
+        self.calls.append("interrupt")
 
-    async def generate_reply(self, *, instructions: str | None = None, **_kwargs: Any) -> None:
-        self.replies.append({"instructions": instructions})
+    async def say(self, text: str) -> None:
+        self.calls.append("say")
+        self.said.append(text)
 
     async def aclose(self) -> None:
         self.closed = True
 
 
 @pytest.mark.asyncio
-async def test_realtime_fallback_uses_generate_reply_when_say_fails(
+async def test_realtime_escalation_interrupts_then_says_script(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The deploy regression: in realtime mode `say` raises and we must fall back."""
+    """In realtime mode, interrupt the in-flight reply before speaking the script.
+
+    Regression: an earlier implementation tried to fall back to
+    ``generate_reply(instructions=script)``, which raced with the
+    model's auto-reply ("conversation_already_has_active_response"),
+    let the model paraphrase, and clipped the audio at session close.
+    The fix attaches a TTS so ``say()`` works in realtime mode, and
+    the hook ``interrupt()``-s any in-flight response first.
+    """
     monkeypatch.setattr(
         "agent.session.core_safety_events.record",
         lambda *a, **k: None,
@@ -554,13 +565,18 @@ async def test_realtime_fallback_uses_generate_reply_when_say_fails(
     _fire(session, _FakeEvent(_FakeItem(role="user", text="I am having chest pain")))
     await _drain()
 
-    assert session.replies, "the realtime fallback must have called generate_reply"
-    instructions = session.replies[0]["instructions"]
-    assert instructions is not None
-    assert safety.escalation_script_for(safety.RedFlagTier.EMERGENT) in instructions
-    # The say-failure warning is logged but does not block the fallback.
-    assert any(r.get("event") == "agent.safety.say_failed" for r in log.records)
+    assert session.calls[:2] == [
+        "interrupt",
+        "say",
+    ], f"interrupt must be awaited before say; got {session.calls}"
+    assert session.said == [safety.escalation_script_for(safety.RedFlagTier.EMERGENT)]
     assert session.closed is True
+    # An info log line marks where in the timeline the TTS speak
+    # occurs — the per-utterance TTS metrics line lives on a different
+    # logger so it's hard to correlate without an explicit anchor.
+    spoken = [r for r in log.records if r.get("event") == "agent.safety.script_spoken"]
+    assert spoken, "an agent.safety.script_spoken info log must mark when say() ran"
+    assert spoken[0]["tier"] == "emergent"
 
 
 @pytest.mark.asyncio

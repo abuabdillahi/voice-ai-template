@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import Any
 
 from livekit.agents.llm import RealtimeModel
+from livekit.agents.tts import TTS
 from livekit.plugins import openai as openai_plugin
 
 from core.config import Settings, get_settings
@@ -28,6 +29,14 @@ from core.config import Settings, get_settings
 # The default OpenAI realtime model. Pinned by name here so the choice
 # is reviewable and so an upgrade is a single-line change.
 _DEFAULT_OPENAI_REALTIME_MODEL = "gpt-realtime"
+
+# Default voice. Must exist in BOTH the gpt-realtime catalog and the
+# gpt-4o-mini-tts catalog so the realtime model and the safety-TTS
+# share a voice — otherwise the safety script sounds like it comes
+# from a different system. Overlapping set: alloy, ash, ballad, coral,
+# sage, shimmer, verse. Realtime-only voices (marin, cedar) are off
+# limits because the TTS plugin would error at speak time.
+_DEFAULT_VOICE = "sage"
 
 
 def create_realtime_model(
@@ -52,10 +61,44 @@ def create_realtime_model(
     kwargs: dict[str, Any] = {
         "model": _DEFAULT_OPENAI_REALTIME_MODEL,
         "api_key": settings.openai_api_key,
+        "voice": voice if voice is not None else _DEFAULT_VOICE,
     }
-    if voice is not None:
-        kwargs["voice"] = voice
     return openai_plugin.realtime.RealtimeModel(**kwargs)
 
 
-__all__ = ["create_realtime_model"]
+def create_safety_tts(
+    settings: Settings | None = None,
+    *,
+    voice: str | None = None,
+) -> TTS:
+    """Build the TTS attached to the AgentSession for safety scripts.
+
+    The realtime model is speech-to-speech and has no separate TTS
+    pipeline, so ``AgentSession.say(text)`` raises with "no TTS model".
+    Attaching a real TTS makes ``say()`` work, which is what the safety
+    hook needs to play the versioned escalation script verbatim — the
+    earlier ``generate_reply(instructions=...)`` fallback raced with
+    the realtime model's in-flight reply and let the model paraphrase.
+    This TTS only fires on safety escalations (rare).
+
+    ``voice`` must match the realtime model's voice so the safety
+    script doesn't sound like it comes from a different speaker. The
+    caller (``build_session``) threads the same voice into both
+    factories. Pass a value from the overlapping set (alloy, ash,
+    ballad, coral, sage, shimmer, verse) — realtime-only voices
+    (marin, cedar) will error at speak time.
+    """
+    settings = settings or get_settings()
+    return openai_plugin.TTS(
+        api_key=settings.openai_api_key,
+        voice=voice if voice is not None else _DEFAULT_VOICE,
+    )
+
+
+__all__ = ["create_realtime_model", "create_safety_tts", "DEFAULT_VOICE"]
+
+
+# Public alias of the module-private default — exposed so call sites
+# (chiefly ``build_session``) can resolve ``voice=None`` to the same
+# value that goes into both the realtime model and the safety TTS.
+DEFAULT_VOICE = _DEFAULT_VOICE
