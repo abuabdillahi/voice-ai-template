@@ -29,6 +29,22 @@ single-session and the cross-session "remember about you" surface is an
 avoidable hallucination risk for a medical-adjacent product. The
 ``_load_user_preferences`` and ``build_system_prompt`` personalisation
 helpers below are likewise retained but bypassed for this product.
+
+A *third* memory surface — prompt-time injection of structured triage-
+outcome facts via :func:`build_triage_system_prompt` — has been added
+on top of the two decisions above. It does *not* reverse them: mem0
+stays unregistered, the personalisation ``build_system_prompt`` stays
+bypassed. What makes the third surface acceptable where the others
+were not is the safety floor it operates inside: only the
+deterministically-extracted ``identified_condition_id`` (auditable,
+not LLM-extracted) is named in the opener; the free-text
+``recall_context`` is supplied for grounding only and the prompt
+explicitly forbids quoting any treatment numbers from it; the fetch
+is bounded at the last three condition-bearing prior sessions; and
+no model decision about *when* to recall is required — the prompt
+either has the block or it doesn't. Future contributors should not
+read "triage does not personalise" as ruling this surface out — it
+was written about the other two and pre-dates this one.
 """
 
 from __future__ import annotations
@@ -105,13 +121,38 @@ TRIAGE_TOOL_NAMES: tuple[str, ...] = (
 )
 
 
-def _build_system_prompt() -> str:
-    """Compose the triage system prompt with the embedded knowledge base.
+_TRIAGE_OPENER_RULE = (
+    "When a 'Most recent session' block is present at the top of this "
+    "prompt, open the conversation by naming the prior identified "
+    "condition and offering the fork between following up on that "
+    "condition and raising something new (for example: 'Are you "
+    "checking back on that, or is something new bothering you?'). Do "
+    "not greet the user with a recap of every earlier session."
+)
+_TRIAGE_NUMBERS_RULE = (
+    "Never quote treatment specifics, stretch durations, exercise rep "
+    "counts, contraindications, or expected timelines from the recall "
+    "block. New specifics this session must come fresh from "
+    "`recommend_treatment` for the matching condition."
+)
+
+
+def _build_static_triage_prompt() -> str:
+    """Compose the static triage system prompt with the embedded knowledge base.
 
     Built lazily so the rendered ``kb_for_prompt()`` block is computed
     at session-start time. Pure function over :mod:`core.conditions`,
     so tests can call it directly to assert prompt shape without
     standing up a session.
+
+    The prompt includes the two new triage rules verbatim — the opener
+    rule and the numbers-forbidden rule — even when no prior-session
+    block is rendered. The opener rule is a no-op when its precondition
+    ("Most recent session" block present) does not hold, and the
+    numbers-forbidden rule reinforces the existing hard rule on
+    treatment specifics. Keeping the rules unconditional means a fresh
+    user session and a returning-user session run under the same set
+    of rules — only the prepended block changes.
     """
     in_scope = (
         "carpal tunnel syndrome, computer vision syndrome (digital eye strain), "
@@ -148,6 +189,10 @@ When you have gathered enough OPQRST slots to form a working hypothesis, call `g
 
 Hard rule on numerical specifics: never speak a treatment protocol, stretch duration, exercise rep count, contraindication, or numerical timeline that did not come from `recommend_treatment` for the matching condition. If you find yourself about to speak a number or a specific protocol step, you must have read it from a `recommend_treatment` payload first. The model's own knowledge is not a source.
 
+Cross-session recall rules:
+- {_TRIAGE_OPENER_RULE}
+- {_TRIAGE_NUMBERS_RULE}
+
 Red-flag handling: if the user volunteers a symptom you judge consistent with an emergency (e.g. chest pain, sudden one-sided weakness, sudden severe headache, loss of consciousness, sudden vision loss, difficulty breathing) or with cauda equina (bowel or bladder dysfunction with back pain, saddle numbness, progressive neurological deficit), call the `escalate` tool with the appropriate tier ('emergent', 'urgent', or 'clinician_soon') and a one-sentence reason. The agent worker also runs an independent server-side red-flag screen on every utterance and plays the scripted escalation if the screen fires — so even if you miss it, the user is protected. Speaking your own free-form escalation language instead of the scripted message is not allowed; if the runtime escalation message has been spoken on your behalf, do not paraphrase or reopen the conversation.
 
 Hard rules — never violated:
@@ -165,7 +210,71 @@ Keep responses brief and natural for a spoken conversation. Acknowledge what the
 """
 
 
-SYSTEM_PROMPT = _build_system_prompt()
+def _render_prior_sessions_block(
+    prior_sessions: list[core_conversations.PriorSession],
+) -> str:
+    """Render the two-part prior-sessions block prepended to the static prompt.
+
+    The first sub-block — "Most recent session" — names the most recent
+    identified condition and recall context and is what drives the
+    opener. The second sub-block — "Earlier sessions" — lists up to two
+    further condition-bearing sessions for the model's reasoning only;
+    the prompt explicitly forbids opening by referencing them so a
+    "I see you've been here three times" greeting cannot land.
+    """
+    most_recent = prior_sessions[0]
+    most_recent_recall = (
+        most_recent.recall_context if most_recent.recall_context else "(no recall context recorded)"
+    )
+    lines: list[str] = [
+        "Most recent session — condition: " f"{most_recent.identified_condition_id}",
+        f"Recall context: {most_recent_recall}",
+    ]
+    earlier = prior_sessions[1:]
+    if earlier:
+        lines.append("")
+        lines.append(
+            "Earlier sessions (for pattern recognition, do not open by referencing these):"
+        )
+        for session in earlier:
+            recall = session.recall_context or "(no recall context recorded)"
+            lines.append(f"- condition: {session.identified_condition_id}; recall: {recall}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_triage_system_prompt(
+    prior_sessions: list[core_conversations.PriorSession] | None = None,
+) -> str:
+    """Compose the per-session triage system prompt.
+
+    With ``prior_sessions`` empty (or ``None``) the rendered string is
+    byte-for-byte identical to today's static triage system prompt —
+    this is the regression-test anchor for first-time users and for
+    returning users whose prior sessions all ended without an
+    identified condition.
+
+    With a non-empty list, a two-part block — "Most recent session"
+    plus optional "Earlier sessions" — is prepended to the static
+    prompt. The most recent session drives the opener; the earlier
+    ones are for pattern recognition only.
+
+    Pure function: tests assert the rendered string directly without
+    standing up an :class:`AgentSession`.
+    """
+    static_prompt = _build_static_triage_prompt()
+    sessions = prior_sessions or []
+    if not sessions:
+        return static_prompt
+    return _render_prior_sessions_block(sessions) + "\n" + static_prompt
+
+
+# Module-level alias kept for back-compat with imports that read the
+# static triage prompt directly (e.g. legacy tests). Computed lazily
+# via the empty-input invariance branch of ``build_triage_system_prompt``
+# so any future drift between the alias and the static prompt remains a
+# single source of truth.
+SYSTEM_PROMPT = build_triage_system_prompt([])
 
 
 @dataclass(slots=True)
@@ -893,7 +1002,25 @@ async def entrypoint(ctx: JobContext) -> None:
     # cross-session preference personalisation. The voice argument is
     # left at None so the realtime plugin's default voice is used.
     session = build_session(settings, voice=None)
-    agent = build_agent(deps)
+
+    # Fetch the user's last condition-bearing prior sessions so the
+    # opener can name the previous condition when one exists. Best-
+    # effort: a missing token, an empty list, or any raised exception
+    # all degrade to the empty-input branch of
+    # ``build_triage_system_prompt`` and the user gets a default opener
+    # identical to today's. Failures are warned at structured-event
+    # level so they are observable in production.
+    prior_sessions: list[core_conversations.PriorSession] = []
+    if supabase_token is not None:
+        try:
+            prior_sessions = core_conversations.list_recent_with_recall(
+                user, supabase_token=supabase_token
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade rather than crash
+            log.warning("agent.recall.fetch_failed", error=str(exc))
+            prior_sessions = []
+    instructions = build_triage_system_prompt(prior_sessions)
+    agent = build_agent(deps, instructions=instructions)
 
     _wire_tool_call_forwarding(
         session,
@@ -979,6 +1106,7 @@ __all__ = [
     "build_agent",
     "build_session",
     "build_system_prompt",
+    "build_triage_system_prompt",
     "entrypoint",
     "worker_options",
 ]

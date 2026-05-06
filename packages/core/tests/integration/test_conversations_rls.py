@@ -284,9 +284,9 @@ def test_end_summary_path_with_mocked_llm_via_core_module(
 
     summary_called: dict[str, bool] = {"called": False}
 
-    def _summary_fn(_msgs: list[core_conversations.Message]) -> str:
+    def _summary_fn(_msgs: list[core_conversations.Message]) -> tuple[str, str | None]:
         summary_called["called"] = True
-        return "Test summary."
+        return ("Test summary.", None)
 
     # Stub out the Supabase client. Each call returns a tiny shim that
     # reads/writes the live psycopg connection so the database

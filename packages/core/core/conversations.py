@@ -11,16 +11,17 @@ access token so PostgREST runs the query as the authenticated user and
 RLS policies (``0002_conversations.sql``) apply. Without the token the
 query hits the table as the ``anon`` role and silently returns no rows.
 
-``end`` calls :func:`generate_summary` automatically when the caller
-does not supply one and the conversation has at least three messages
-(the threshold is the AC's; below it, a summary would be near-content-
-free). Summarisation uses the OpenAI client; tests inject a callable
-to stay deterministic and offline.
+``end`` calls :func:`generate_summary_and_recall` automatically when
+the caller does not supply one and the conversation has at least three
+messages (the threshold is the AC's; below it, a summary would be near-
+content-free). Summarisation uses the OpenAI client; tests inject a
+callable to stay deterministic and offline.
 """
 
 from __future__ import annotations
 
 import builtins
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,6 +29,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from core.auth import User
+from core.conditions import CONDITIONS
 from core.config import Settings, get_settings
 from core.supabase import get_user_client
 
@@ -43,8 +45,14 @@ _MESSAGES_TABLE = "messages"
 # the LLM round-trip and leave summary NULL.
 _SUMMARY_MESSAGE_COUNT_THRESHOLD = 3
 
-# Type for the optional summariser callable injected by tests.
-SummaryFn = Callable[[builtins.list["Message"]], str]
+# Type for the optional summariser callable injected by tests. Returns
+# a tuple ``(summary, recall_context)`` — the one-sentence preview that
+# drives the history-list UI plus the richer free-text blob the next
+# session reads at prompt-injection time. ``recall_context`` is allowed
+# to be ``None`` so a malformed-JSON / network-failure path can still
+# populate ``summary`` via the truncation fallback without inventing a
+# recall blob.
+SummaryFn = Callable[[builtins.list["Message"]], tuple[str, str | None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +102,22 @@ class ConversationSummary:
     ended_at: datetime | None
     summary: str | None
     message_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class PriorSession:
+    """One condition-bearing prior session, projected for prompt injection.
+
+    Returned by :func:`list_recent_with_recall`. Deliberately a separate
+    shape from :class:`ConversationSummary` so the ``/conversations``
+    API endpoint contract — which the web history page consumes — is
+    not affected by the addition of ``recall_context``. The agent
+    worker is the only consumer.
+    """
+
+    started_at: datetime
+    identified_condition_id: str
+    recall_context: str | None
 
 
 def _parse_uuid(value: Any) -> UUID:
@@ -230,24 +254,35 @@ def end(
 
     When ``summary`` is None and the conversation has at least
     :data:`_SUMMARY_MESSAGE_COUNT_THRESHOLD` messages, this calls
-    :func:`generate_summary` to mint one. Tests inject ``summary_fn``
-    to keep the path deterministic; production passes nothing and the
-    OpenAI client wired into :func:`generate_summary` is used.
+    :func:`generate_summary_and_recall` to mint a ``(summary,
+    recall_context)`` pair and also runs
+    :func:`extract_identified_condition` over the same message list to
+    populate the structured ``identified_condition_id`` column. Tests
+    inject ``summary_fn`` to keep the path deterministic; production
+    passes nothing and the OpenAI-backed default is used.
+
+    When ``summary`` is supplied explicitly the function does not fetch
+    the message list — there is no second tuple element to derive — so
+    the new recall columns stay NULL on that path. This matches the
+    pre-recall behaviour for the explicit-summary call site.
     """
     if supabase_token is None:
         raise PermissionError("core.conversations.end requires the user's Supabase access token.")
     client = get_user_client(supabase_token)
 
     resolved_summary = summary
+    resolved_recall_context: str | None = None
+    resolved_condition_id: str | None = None
     if resolved_summary is None:
         messages = _list_messages(conv_id, supabase_token=supabase_token)
         if len(messages) >= _SUMMARY_MESSAGE_COUNT_THRESHOLD:
-            resolved_summary = generate_summary(
+            resolved_summary, resolved_recall_context = generate_summary_and_recall(
                 conv_id,
                 messages=messages,
                 summary_fn=summary_fn,
                 settings=settings,
             )
+            resolved_condition_id = extract_identified_condition(messages)
 
     update: dict[str, Any] = {"ended_at": "now()"}
     # PostgREST does not interpret SQL function literals in payloads;
@@ -256,6 +291,10 @@ def end(
     update["ended_at"] = datetime.now().astimezone().isoformat()
     if resolved_summary is not None:
         update["summary"] = resolved_summary
+    if resolved_recall_context is not None:
+        update["recall_context"] = resolved_recall_context
+    if resolved_condition_id is not None:
+        update["identified_condition_id"] = resolved_condition_id
 
     client.table(_CONVERSATIONS_TABLE).update(update).eq("id", str(conv_id)).execute()
 
@@ -355,59 +394,77 @@ def get(
     )
 
 
-def generate_summary(
+def generate_summary_and_recall(
     conv_id: UUID,  # noqa: ARG001 — accepted for symmetry with the AC signature
     *,
     messages: builtins.list[Message] | None = None,
     summary_fn: SummaryFn | None = None,
     settings: Settings | None = None,
-) -> str:
-    """Produce a short natural-language summary of a conversation.
+) -> tuple[str, str | None]:
+    """Produce a one-sentence summary plus a richer recall blob.
 
     The default implementation calls OpenAI (using the API key in
     :class:`Settings`) with the message history. Tests pass an
     explicit ``summary_fn`` to bypass the network round-trip — that
     callable receives the same :class:`Message` list and returns the
-    summary string.
+    same ``(summary, recall_context)`` tuple shape.
 
     ``messages`` is accepted as a parameter so :func:`end` can pass
     the list it already fetched, avoiding a duplicate read.
+
+    Failure modes (malformed JSON, network exception, missing OpenAI
+    install) yield ``(_truncated_fallback(transcript), None)`` — the
+    history-list UI still gets a populated ``summary`` and the next
+    session simply sees no recall context for this conversation.
     """
     if messages is None:
         # The function is otherwise stateless wrt Supabase; if a caller
         # asks for a summary by id alone, we cannot fulfil it without a
         # token. Surface the contract issue instead of pretending.
         raise ValueError(
-            "generate_summary requires a `messages` list; pass the result of "
+            "generate_summary_and_recall requires a `messages` list; pass the result of "
             "`_list_messages` from a token-scoped call site."
         )
 
     if summary_fn is not None:
         return summary_fn(messages)
 
-    return _default_summary_fn(messages, settings=settings)
+    return _default_summary_and_recall_fn(messages, settings=settings)
 
 
-def _default_summary_fn(
+def _default_summary_and_recall_fn(
     messages: builtins.list[Message],
     *,
     settings: Settings | None = None,
-) -> str:
-    """Default summary implementation backed by the OpenAI Python client.
+) -> tuple[str, str | None]:
+    """Default summary+recall implementation backed by the OpenAI Python client.
 
-    Imported lazily so the unit-test path that injects ``summary_fn``
-    never pays the OpenAI import cost. We pin a small, cheap model
-    here — summaries should fit in one or two sentences.
+    One gpt-4o-mini call requests a small JSON object with two
+    top-level keys: ``summary`` (one short sentence — the history-list
+    UI's existing shape) and ``recall_context`` (a richer blob covering
+    what was discussed, what was recommended, and any user-reported
+    outcomes). Tool messages for ``recommend_treatment`` are included
+    verbatim in the prompt input so the LLM can ground the recall blob
+    in what the agent actually recommended.
+
+    Imported lazily so the unit-test path that injects a callable
+    never pays the OpenAI import cost.
     """
     settings = settings or get_settings()
 
-    # Build a single concatenated prompt of role-tagged turns. The
-    # realtime model speaks back to the user; this summary is a quick
-    # gist for the history list, not a faithful reproduction.
+    # Build a single concatenated prompt of role-tagged turns. Tool
+    # messages render with their args+result for `recommend_treatment`
+    # so the LLM can describe what was recommended; other tool calls
+    # render as a compact tag.
     turns: builtins.list[str] = []
     for m in messages:
         if m.role == "tool":
-            turns.append(f"[tool {m.tool_name or 'unknown'}]")
+            if m.tool_name == "recommend_treatment":
+                args_blob = json.dumps(m.tool_args or {}, sort_keys=True)
+                result_blob = json.dumps(m.tool_result, sort_keys=True, default=str)
+                turns.append(f"[tool recommend_treatment args={args_blob} result={result_blob}]")
+            else:
+                turns.append(f"[tool {m.tool_name or 'unknown'}]")
         else:
             turns.append(f"{m.role}: {m.content}")
     transcript = "\n".join(turns)
@@ -415,7 +472,7 @@ def _default_summary_fn(
     try:
         from openai import OpenAI
     except ImportError:  # pragma: no cover — openai always installed via livekit-agents extra
-        return _truncated_fallback(transcript)
+        return (_truncated_fallback(transcript), None)
 
     client = OpenAI(api_key=settings.openai_api_key)
     try:
@@ -425,24 +482,139 @@ def _default_summary_fn(
                 {
                     "role": "system",
                     "content": (
-                        "You write one-sentence summaries of voice "
-                        "conversations between a user and an assistant. "
-                        "Reply with the summary only — no preamble."
+                        "You summarise voice triage conversations between a "
+                        "user and an educational triage assistant. Reply with "
+                        'a JSON object with exactly two keys: "summary" — one '
+                        "short sentence suitable for a history list — and "
+                        '"recall_context" — a richer paragraph covering what '
+                        "was discussed, what (if anything) was recommended, "
+                        "and any user-reported outcomes. Reply with the JSON "
+                        "object only — no preamble, no Markdown fence."
                     ),
                 },
                 {"role": "user", "content": transcript},
             ],
-            max_tokens=80,
+            response_format={"type": "json_object"},
+            max_tokens=400,
             temperature=0.2,
         )
     except Exception:  # noqa: BLE001 — best-effort summary, never crash session-end.
-        return _truncated_fallback(transcript)
+        return (_truncated_fallback(transcript), None)
 
     choice = response.choices[0] if response.choices else None
     content = choice.message.content if choice and choice.message else None
     if not content:
-        return _truncated_fallback(transcript)
-    return content.strip()
+        return (_truncated_fallback(transcript), None)
+
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        return (_truncated_fallback(transcript), None)
+
+    if not isinstance(parsed, dict):
+        return (_truncated_fallback(transcript), None)
+
+    summary_value = parsed.get("summary")
+    recall_value = parsed.get("recall_context")
+    summary_text = (
+        summary_value.strip() if isinstance(summary_value, str) and summary_value.strip() else None
+    )
+    recall_text = (
+        recall_value.strip() if isinstance(recall_value, str) and recall_value.strip() else None
+    )
+    if summary_text is None:
+        return (_truncated_fallback(transcript), None)
+    return (summary_text, recall_text)
+
+
+def extract_identified_condition(
+    messages: builtins.list[Message],
+) -> str | None:
+    """Return the most recent successful ``recommend_treatment`` condition id.
+
+    Scans ``messages`` in reverse for ``tool`` rows where
+    ``tool_name == "recommend_treatment"`` and the ``tool_result`` is a
+    successful payload (no ``error`` key). The ``condition_id`` is read
+    from ``tool_args``, validated against
+    :data:`core.conditions.CONDITIONS`, and returned. Unknown ids,
+    error payloads, and message lists with no successful call all
+    return ``None``.
+
+    Pure function — no Supabase, no LLM. The structured
+    ``identified_condition_id`` column is the load-bearing fact that
+    drives the next session's opener; deriving it deterministically
+    from the persisted tool transcript keeps it auditable and outside
+    the surface-area of LLM hallucination.
+    """
+    for message in reversed(messages):
+        if message.role != "tool":
+            continue
+        if message.tool_name != "recommend_treatment":
+            continue
+        result = message.tool_result
+        if isinstance(result, dict) and "error" in result:
+            continue
+        if result is None:
+            continue
+        args = message.tool_args or {}
+        condition_id = args.get("condition_id") if isinstance(args, dict) else None
+        if not isinstance(condition_id, str):
+            continue
+        if condition_id not in CONDITIONS:
+            return None
+        return condition_id
+    return None
+
+
+def list_recent_with_recall(
+    user: User,
+    *,
+    limit: int = 3,
+    supabase_token: str | None = None,
+) -> builtins.list[PriorSession]:
+    """Return the user's most recent condition-bearing prior sessions.
+
+    Filters to rows where ``identified_condition_id IS NOT NULL`` so a
+    first-time user, or a returning user whose prior sessions all ended
+    without an identified condition, sees an empty list — and the
+    triage prompt builder degrades to today's static prompt.
+
+    Ordered ``started_at`` descending; capped at ``limit`` (defaults to
+    3 per the PRD's bounded-prompt rule). Returns the projection
+    :class:`PriorSession` so the existing ``/conversations`` API
+    endpoint contract — which serves :class:`ConversationSummary` — is
+    unaffected.
+    """
+    if supabase_token is None:
+        raise PermissionError(
+            "core.conversations.list_recent_with_recall requires the user's "
+            "Supabase access token."
+        )
+    client = get_user_client(supabase_token)
+    response = (
+        client.table(_CONVERSATIONS_TABLE)
+        .select("started_at,identified_condition_id,recall_context")
+        .eq("user_id", str(user.id))
+        .filter("identified_condition_id", "not.is", "null")
+        .order("started_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    rows = cast(_list[dict[str, Any]], response.data or [])
+    sessions: builtins.list[PriorSession] = []
+    for row in rows:
+        condition_id = row.get("identified_condition_id")
+        if not isinstance(condition_id, str) or not condition_id:
+            continue
+        recall = row.get("recall_context")
+        sessions.append(
+            PriorSession(
+                started_at=_parse_datetime(row["started_at"]),
+                identified_condition_id=condition_id,
+                recall_context=recall if isinstance(recall, str) else None,
+            )
+        )
+    return sessions
 
 
 def _truncated_fallback(transcript: str) -> str:
@@ -462,11 +634,14 @@ __all__ = [
     "Conversation",
     "ConversationSummary",
     "Message",
+    "PriorSession",
     "SummaryFn",
     "append_message",
     "end",
-    "generate_summary",
+    "extract_identified_condition",
+    "generate_summary_and_recall",
     "get",
     "list_for_user",
+    "list_recent_with_recall",
     "start",
 ]

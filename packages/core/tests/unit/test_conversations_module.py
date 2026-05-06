@@ -239,9 +239,9 @@ def test_end_without_summary_below_threshold_skips_summarisation(
 
     sentinel_called: dict[str, bool] = {"called": False}
 
-    def _summary_fn(_msgs: list[Message]) -> str:
+    def _summary_fn(_msgs: list[Message]) -> tuple[str, str | None]:
         sentinel_called["called"] = True
-        return "should not be used"
+        return ("should not be used", None)
 
     conversations.end(_CONV_ID, supabase_token=_TOKEN, summary_fn=_summary_fn)
 
@@ -292,9 +292,9 @@ def test_end_calls_summary_fn_when_threshold_met(monkeypatch: pytest.MonkeyPatch
 
     captured_msgs: dict[str, list[Message]] = {}
 
-    def _summary_fn(msgs: list[Message]) -> str:
+    def _summary_fn(msgs: list[Message]) -> tuple[str, str | None]:
         captured_msgs["msgs"] = msgs
-        return "Discussed the weather."
+        return ("Discussed the weather.", "Recall: discussed weather forecasts.")
 
     conversations.end(_CONV_ID, supabase_token=_TOKEN, summary_fn=_summary_fn)
 
@@ -303,6 +303,7 @@ def test_end_calls_summary_fn_when_threshold_met(monkeypatch: pytest.MonkeyPatch
     assert len(updates) == 1
     payload = updates[0][0]
     assert payload["summary"] == "Discussed the weather."
+    assert payload["recall_context"] == "Recall: discussed weather forecasts."
     assert "ended_at" in payload
 
 
@@ -416,7 +417,322 @@ def test_get_returns_none_when_not_found(monkeypatch: pytest.MonkeyPatch) -> Non
     assert conversations.get(_USER, _CONV_ID, supabase_token=_TOKEN) is None
 
 
-def test_generate_summary_uses_injected_callable() -> None:
+def _tool_message(
+    *,
+    tool_name: str,
+    tool_args: dict[str, Any] | None,
+    tool_result: Any,
+    when: datetime | None = None,
+) -> Message:
+    return Message(
+        id=uuid4(),
+        conversation_id=_CONV_ID,
+        role="tool",
+        content="",
+        tool_name=tool_name,
+        tool_args=tool_args,
+        tool_result=tool_result,
+        created_at=when or datetime(2026, 5, 4, tzinfo=UTC),
+    )
+
+
+def _user_message(content: str = "hi") -> Message:
+    return Message(
+        id=uuid4(),
+        conversation_id=_CONV_ID,
+        role="user",
+        content=content,
+        tool_name=None,
+        tool_args=None,
+        tool_result=None,
+        created_at=datetime(2026, 5, 4, tzinfo=UTC),
+    )
+
+
+def test_extract_identified_condition_returns_condition_id_for_single_success() -> None:
+    msgs = [
+        _user_message(),
+        _tool_message(
+            tool_name="recommend_treatment",
+            tool_args={"condition_id": "carpal_tunnel"},
+            tool_result={"condition_id": "carpal_tunnel", "name": "Carpal tunnel syndrome"},
+        ),
+    ]
+    assert conversations.extract_identified_condition(msgs) == "carpal_tunnel"
+
+
+def test_extract_identified_condition_returns_most_recent() -> None:
+    msgs = [
+        _tool_message(
+            tool_name="recommend_treatment",
+            tool_args={"condition_id": "lumbar_strain"},
+            tool_result={"condition_id": "lumbar_strain"},
+        ),
+        _user_message(),
+        _tool_message(
+            tool_name="recommend_treatment",
+            tool_args={"condition_id": "tension_type_headache"},
+            tool_result={"condition_id": "tension_type_headache"},
+        ),
+    ]
+    assert conversations.extract_identified_condition(msgs) == "tension_type_headache"
+
+
+def test_extract_identified_condition_skips_error_tool_calls() -> None:
+    msgs = [
+        _tool_message(
+            tool_name="recommend_treatment",
+            tool_args={"condition_id": "upper_trapezius_strain"},
+            tool_result={"condition_id": "upper_trapezius_strain"},
+        ),
+        _tool_message(
+            tool_name="recommend_treatment",
+            tool_args={"condition_id": "carpal_tunnel"},
+            tool_result={"error": "below confidence threshold"},
+        ),
+    ]
+    # The most recent successful call is the trapezius one; the error
+    # row must not shadow it.
+    assert conversations.extract_identified_condition(msgs) == "upper_trapezius_strain"
+
+
+def test_extract_identified_condition_returns_none_for_unknown_condition() -> None:
+    msgs = [
+        _tool_message(
+            tool_name="recommend_treatment",
+            tool_args={"condition_id": "not_a_real_condition"},
+            tool_result={"condition_id": "not_a_real_condition"},
+        ),
+    ]
+    assert conversations.extract_identified_condition(msgs) is None
+
+
+def test_extract_identified_condition_returns_none_when_no_recommend_treatment() -> None:
+    msgs = [
+        _user_message(),
+        _tool_message(
+            tool_name="record_symptom",
+            tool_args={"slot": "location", "value": "wrist"},
+            tool_result={"ok": True},
+        ),
+    ]
+    assert conversations.extract_identified_condition(msgs) is None
+
+
+class _StubChoice:
+    def __init__(self, content: str) -> None:
+        self.message = type("_M", (), {"content": content})()
+
+
+class _StubResponse:
+    def __init__(self, content: str) -> None:
+        self.choices = [_StubChoice(content)]
+
+
+class _StubChat:
+    def __init__(self, response: Any) -> None:
+        self.completions = self
+        self._response = response
+        self.captured: dict[str, Any] = {}
+
+    def create(self, **kwargs: Any) -> Any:
+        self.captured.update(kwargs)
+        if isinstance(self._response, Exception):
+            raise self._response
+        return self._response
+
+
+class _StubOpenAI:
+    last: _StubChat | None = None
+
+    def __init__(self, *_a: Any, **_k: Any) -> None:
+        self.chat = _StubChat(_StubOpenAI._next_response)  # type: ignore[arg-type]
+        _StubOpenAI.last = self.chat
+
+    _next_response: Any = None
+
+
+def _install_stub_openai(
+    monkeypatch: pytest.MonkeyPatch,
+    response: Any,
+) -> type[_StubOpenAI]:
+    import sys
+    import types
+
+    fake_module = types.ModuleType("openai")
+    _StubOpenAI._next_response = response
+    fake_module.OpenAI = _StubOpenAI  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "openai", fake_module)
+    return _StubOpenAI
+
+
+def _settings_for_summary() -> Any:
+    from core.config import Settings
+
+    return Settings(
+        livekit_api_key="lk-test-key",  # pragma: allowlist secret
+        livekit_api_secret="lk-test-secret",  # pragma: allowlist secret
+        livekit_url="wss://test.livekit.cloud",
+        openai_api_key="sk-test",  # pragma: allowlist secret
+        supabase_url="https://test.supabase.co",
+        supabase_jwks_url="https://test.supabase.co/auth/v1/.well-known/jwks.json",
+        supabase_jwt_secret="test-secret",  # pragma: allowlist secret
+        supabase_anon_key="anon-key",  # pragma: allowlist secret
+        supabase_service_role_key="service-key",  # pragma: allowlist secret
+    )
+
+
+def test_default_summary_and_recall_fn_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    import json as _json
+
+    payload = _json.dumps(
+        {
+            "summary": "Discussed wrist tingling.",
+            "recall_context": "User reported wrist tingling consistent with carpal tunnel; "
+            "agent recommended the carpal tunnel protocol.",
+        }
+    )
+    _install_stub_openai(monkeypatch, _StubResponse(payload))
+
+    msgs = [
+        _user_message("my wrist is tingling"),
+        _tool_message(
+            tool_name="recommend_treatment",
+            tool_args={"condition_id": "carpal_tunnel"},
+            tool_result={"condition_id": "carpal_tunnel", "name": "Carpal tunnel syndrome"},
+        ),
+    ]
+    summary, recall = conversations._default_summary_and_recall_fn(  # type: ignore[attr-defined]
+        msgs, settings=_settings_for_summary()
+    )
+    assert summary == "Discussed wrist tingling."
+    assert recall is not None and "carpal tunnel" in recall.lower()
+    captured = _StubOpenAI.last.captured if _StubOpenAI.last else {}
+    user_messages = [m for m in captured.get("messages", []) if m.get("role") == "user"]
+    # The transcript carries the recommend_treatment call so the LLM
+    # can ground the recall blob in what was actually recommended.
+    assert any(
+        "recommend_treatment" in (m.get("content") or "") for m in user_messages
+    ), "recommend_treatment tool message must be in the prompt input"
+
+
+def test_default_summary_and_recall_fn_malformed_json_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stub_openai(monkeypatch, _StubResponse("not json at all"))
+    msgs = [_user_message("hello there friend")]
+    summary, recall = conversations._default_summary_and_recall_fn(  # type: ignore[attr-defined]
+        msgs, settings=_settings_for_summary()
+    )
+    assert recall is None
+    assert summary  # truncation fallback returns the leading transcript chars
+    assert "hello" in summary
+
+
+def test_default_summary_and_recall_fn_exception_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stub_openai(monkeypatch, RuntimeError("network down"))
+    msgs = [_user_message("hello there friend")]
+    summary, recall = conversations._default_summary_and_recall_fn(  # type: ignore[attr-defined]
+        msgs, settings=_settings_for_summary()
+    )
+    assert recall is None
+    assert summary
+    assert "hello" in summary
+
+
+def test_end_persists_identified_condition_and_recall(monkeypatch: pytest.MonkeyPatch) -> None:
+    rec_msg_args = {"condition_id": "tension_type_headache"}
+    msgs_data: list[dict[str, Any]] = [
+        {
+            "id": str(uuid4()),
+            "conversation_id": str(_CONV_ID),
+            "role": "user",
+            "content": "my head hurts",
+            "tool_name": None,
+            "tool_args": None,
+            "tool_result": None,
+            "created_at": _NOW_ISO,
+        },
+        {
+            "id": str(uuid4()),
+            "conversation_id": str(_CONV_ID),
+            "role": "assistant",
+            "content": "tell me more",
+            "tool_name": None,
+            "tool_args": None,
+            "tool_result": None,
+            "created_at": _NOW_ISO,
+        },
+        {
+            "id": str(uuid4()),
+            "conversation_id": str(_CONV_ID),
+            "role": "tool",
+            "content": "",
+            "tool_name": "recommend_treatment",
+            "tool_args": rec_msg_args,
+            "tool_result": {"condition_id": "tension_type_headache"},
+            "created_at": _NOW_ISO,
+        },
+    ]
+    factory = _RoutingClientFactory(messages_data=msgs_data)
+    monkeypatch.setattr("core.conversations.get_user_client", factory)
+
+    def _summary_fn(_msgs: list[Message]) -> tuple[str, str | None]:
+        return ("Discussed tension headache.", "Recall: discussed tension headache.")
+
+    conversations.end(_CONV_ID, supabase_token=_TOKEN, summary_fn=_summary_fn)
+
+    updates = [args for n, args, _ in factory.update_calls if n == "update"]
+    payload = updates[0][0]
+    assert payload["summary"] == "Discussed tension headache."
+    assert payload["recall_context"] == "Recall: discussed tension headache."
+    assert payload["identified_condition_id"] == "tension_type_headache"
+
+
+def test_list_recent_with_recall_filters_and_orders(monkeypatch: pytest.MonkeyPatch) -> None:
+    conv_a, conv_b = uuid4(), uuid4()  # noqa: F841 — fixtures, ids not asserted
+    client = _FakeClient(
+        data=[
+            {
+                "started_at": "2026-05-04T12:00:00+00:00",
+                "identified_condition_id": "carpal_tunnel",
+                "recall_context": "User reported wrist tingling.",
+            },
+            {
+                "started_at": "2026-05-03T12:00:00+00:00",
+                "identified_condition_id": "tension_type_headache",
+                "recall_context": None,
+            },
+        ]
+    )
+    monkeypatch.setattr("core.conversations.get_user_client", lambda *_a, **_k: client)
+
+    sessions = conversations.list_recent_with_recall(_USER, supabase_token=_TOKEN)
+
+    assert [s.identified_condition_id for s in sessions] == [
+        "carpal_tunnel",
+        "tension_type_headache",
+    ]
+    assert sessions[0].recall_context == "User reported wrist tingling."
+    assert sessions[1].recall_context is None
+    eq_calls = _calls_named(client, "eq")
+    assert ("user_id", str(_USER.id)) in eq_calls
+    filter_calls = _calls_named(client, "filter")
+    assert ("identified_condition_id", "not.is", "null") in filter_calls
+    order_calls = _calls_named(client, "order")
+    assert order_calls and order_calls[0][0] == "started_at"
+    limit_calls = _calls_named(client, "limit")
+    assert limit_calls and limit_calls[0][0] == 3
+
+
+def test_list_recent_with_recall_without_token_raises() -> None:
+    with pytest.raises(PermissionError):
+        conversations.list_recent_with_recall(_USER)
+
+
+def test_generate_summary_and_recall_uses_injected_callable() -> None:
     msg = Message(
         id=uuid4(),
         conversation_id=_CONV_ID,
@@ -428,14 +744,14 @@ def test_generate_summary_uses_injected_callable() -> None:
         created_at=datetime(2026, 5, 4, tzinfo=UTC),
     )
 
-    def _fn(messages: list[Message]) -> str:
+    def _fn(messages: list[Message]) -> tuple[str, str | None]:
         assert messages == [msg]
-        return "summary text"
+        return ("summary text", "recall blob")
 
-    out = conversations.generate_summary(_CONV_ID, messages=[msg], summary_fn=_fn)
-    assert out == "summary text"
+    out = conversations.generate_summary_and_recall(_CONV_ID, messages=[msg], summary_fn=_fn)
+    assert out == ("summary text", "recall blob")
 
 
-def test_generate_summary_requires_messages() -> None:
+def test_generate_summary_and_recall_requires_messages() -> None:
     with pytest.raises(ValueError):
-        conversations.generate_summary(_CONV_ID)
+        conversations.generate_summary_and_recall(_CONV_ID)

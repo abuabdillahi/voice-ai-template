@@ -10,6 +10,7 @@ triage entrypoint.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from agent.session import (
@@ -17,9 +18,11 @@ from agent.session import (
     build_agent,
     build_session,
     build_system_prompt,
+    build_triage_system_prompt,
     worker_options,
 )
 from core.config import Settings
+from core.conversations import PriorSession
 from livekit.agents import Agent, AgentSession, WorkerOptions
 from livekit.agents.llm import RealtimeModel
 
@@ -179,3 +182,79 @@ def test_build_session_default_voice_overlaps_both_catalogs(settings: Settings) 
             f"that both gpt-realtime and gpt-4o-mini-tts support; got "
             f"none of {overlapping}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Cross-session recall — prompt-time injection of prior-session blocks
+# ---------------------------------------------------------------------------
+
+
+def _prior(condition_id: str, recall: str | None = None, *, day: int = 4) -> PriorSession:
+    return PriorSession(
+        started_at=datetime(2026, 5, day, tzinfo=UTC),
+        identified_condition_id=condition_id,
+        recall_context=recall,
+    )
+
+
+def test_build_triage_system_prompt_empty_matches_static_prompt() -> None:
+    """Empty input is byte-for-byte identical to the static SYSTEM_PROMPT.
+
+    This is the regression-test anchor for first-time users and for
+    returning users whose prior sessions all ended without an
+    identified condition.
+    """
+    assert build_triage_system_prompt([]) == SYSTEM_PROMPT
+    assert build_triage_system_prompt(None) == SYSTEM_PROMPT
+
+
+def test_build_triage_system_prompt_with_one_prior_includes_condition_and_recall() -> None:
+    prior = _prior("carpal_tunnel", recall="User reported wrist tingling, gave glides protocol.")
+    prompt = build_triage_system_prompt([prior])
+    assert "carpal_tunnel" in prompt
+    assert "User reported wrist tingling, gave glides protocol." in prompt
+    # Static prompt body must be retained — assert via a substring that
+    # appears only there.
+    assert "educational triage" in prompt.lower()
+
+
+def test_build_triage_system_prompt_three_prior_includes_both_blocks() -> None:
+    sessions = [
+        _prior("carpal_tunnel", recall="latest visit recall", day=6),
+        _prior("tension_type_headache", recall="middle visit recall", day=5),
+        _prior("lumbar_strain", recall="oldest visit recall", day=4),
+    ]
+    prompt = build_triage_system_prompt(sessions)
+    assert "Most recent session" in prompt
+    assert "carpal_tunnel" in prompt
+    assert "Earlier sessions (for pattern recognition" in prompt
+    assert "tension_type_headache" in prompt
+    assert "lumbar_strain" in prompt
+    # The most-recent block leads; the earlier-sessions block follows.
+    assert prompt.index("Most recent session") < prompt.index("Earlier sessions")
+
+
+def test_build_triage_system_prompt_contains_two_new_rules_verbatim() -> None:
+    """The two new triage rules must appear verbatim in the rendered prompt.
+
+    Drift in the wording of either rule is exactly the failure mode
+    that re-opens the cross-session hallucination risk the safety
+    floor is built to avoid.
+    """
+    from agent.session import _TRIAGE_NUMBERS_RULE, _TRIAGE_OPENER_RULE
+
+    # Empty input still includes both rules — they are unconditional.
+    empty_prompt = build_triage_system_prompt([])
+    assert _TRIAGE_OPENER_RULE in empty_prompt
+    assert _TRIAGE_NUMBERS_RULE in empty_prompt
+
+    populated = build_triage_system_prompt([_prior("carpal_tunnel", recall="recall blob")])
+    assert _TRIAGE_OPENER_RULE in populated
+    assert _TRIAGE_NUMBERS_RULE in populated
+
+
+def test_build_triage_system_prompt_handles_null_recall() -> None:
+    """A prior session with NULL recall_context still renders without raising."""
+    prompt = build_triage_system_prompt([_prior("upper_trapezius_strain", recall=None)])
+    assert "upper_trapezius_strain" in prompt
+    assert "(no recall context recorded)" in prompt

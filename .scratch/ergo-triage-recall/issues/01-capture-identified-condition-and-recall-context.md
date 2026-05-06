@@ -1,0 +1,48 @@
+# Issue 01: Capture `identified_condition_id` and `recall_context` at session end
+
+Status: ready-for-agent
+
+## Parent
+
+`.scratch/ergo-triage-recall/PRD.md`
+
+## What to build
+
+Extend the session-end write path so every triage `conversations` row that ends after this lands carries two new structured pieces of information: the deterministically-extracted `identified_condition_id` (the most recent successful `recommend_treatment` from the transcript), and a richer free-text `recall_context` blob that captures what was discussed, what was recommended, and any user-reported outcomes from prior sessions.
+
+The existing one-sentence `summary` field keeps its current shape — the history-list UI at `apps/web/src/routes/history.index.tsx` reads it directly and must not regress. The richer recall blob and the structured condition column are stored alongside, in two new nullable columns, populated only on session end.
+
+The deep modules introduced in this slice are two pure functions over a `Message` list — one deterministic (`extract_identified_condition`) and one that wraps a single gpt-4o-mini JSON call (`_default_summary_and_recall_fn`). Both are exercised through the existing `summary_fn` injection seam on `core.conversations.end()`, widened from `Callable[[list[Message]], str]` to a tuple-returning callable so tests can stay deterministic and offline. JSON parse failure or network failure on the LLM call falls back to the existing `_truncated_fallback` for `summary` and leaves `recall_context` NULL — the next session simply sees no recall context for that conversation and opens normally.
+
+Forward-only by design: existing rows keep NULL for both new columns. No backfill script. No retroactive LLM summarisation.
+
+## Acceptance criteria
+
+- [ ] Migration `supabase/migrations/0005_conversations_recall.sql` adds `identified_condition_id text NULL` and `recall_context text NULL` to the `conversations` table. Existing RLS policies cover both columns via the row's `user_id`; no policy change.
+- [ ] New pure function `core.conversations.extract_identified_condition(messages: list[Message]) -> str | None` scans the message list in reverse for the most recent `tool` row with `tool_name == "recommend_treatment"` whose `tool_result` parses as a successful payload (no `error` key), returns the `condition_id` from `tool_args` validated against `core.conditions.CONDITIONS`, and returns `None` for missing / error-only / unknown-condition lists.
+- [ ] The existing `_default_summary_fn` is replaced by `_default_summary_and_recall_fn(messages, *, settings) -> tuple[str, str | None]`. One gpt-4o-mini call requests JSON with two top-level keys (`summary` — one short sentence; `recall_context` — a richer blob covering what was discussed, what was recommended, and any user-reported outcomes). Tool messages for `recommend_treatment` are included in the prompt input so the LLM can reference what was recommended.
+- [ ] Failure modes for the LLM call: malformed JSON or any raised exception yields `(_truncated_fallback(transcript), None)` — `summary` is populated by the existing fallback, `recall_context` is left `None`. The function never raises.
+- [ ] The `summary_fn` injection contract on `core.conversations.end()` is widened from `Callable[[list[Message]], str]` to `Callable[[list[Message]], tuple[str, str | None]]`. Existing test injections are updated to return the tuple shape.
+- [ ] `core.conversations.end()` populates `identified_condition_id` (from `extract_identified_condition`) and `recall_context` (from the second tuple element) in the same `UPDATE` payload as the existing `ended_at` and `summary` fields. The threshold for invoking the LLM stays at the existing `_SUMMARY_MESSAGE_COUNT_THRESHOLD`; below it both new columns stay NULL.
+- [ ] The history-list UI at `apps/web/src/routes/history.index.tsx` continues to render `summary` unchanged. The `/conversations` API endpoint contract — `ConversationSummary` — is unaffected.
+- [ ] Unit tests cover `extract_identified_condition`: a single successful `recommend_treatment` returns its `condition_id`; multiple successful calls return the most recent (last-recommend-wins); error tool calls are skipped; an unknown `condition_id` (not in `CONDITIONS`) returns `None`; a message list with no `recommend_treatment` calls returns `None`.
+- [ ] Unit tests cover `_default_summary_and_recall_fn`: JSON happy path returns a tuple where both elements are non-empty strings; malformed JSON returns `(_truncated_fallback(...), None)`; raised exception returns the same fallback shape; tool messages for `recommend_treatment` are present in the prompt input passed to the LLM.
+- [ ] Existing `core.conversations` tests that exercise `end()` with an injected `summary_fn` are updated to the tuple-returning shape and continue to pass; existing assertions about `summary` and `ended_at` are unchanged.
+
+## Blocked by
+
+None — can start immediately.
+
+## Comments
+
+> *This was generated by AI during triage.*
+
+### Agent Brief
+
+**Category:** enhancement
+
+**Summary:** Persist `identified_condition_id` and `recall_context` on every triage `conversations` row at session end so the next session can build a recall block from them.
+
+The "What to build" narrative and "Acceptance criteria" sections above already cover current/desired behaviour, the deep-module interfaces (`extract_identified_condition` and `_default_summary_and_recall_fn`), and concrete testable criteria. Treat those as the contract.
+
+**Out of scope** (see PRD `.scratch/ergo-triage-recall/PRD.md` for the full list): no backfill of existing rows, no changes to the `/conversations` API endpoint contract, no UI changes (the history list keeps reading the unchanged `summary` field), no re-registration of `remember`/`recall` tools, no separate `recommendation_given` or `outcome_reported` columns.
