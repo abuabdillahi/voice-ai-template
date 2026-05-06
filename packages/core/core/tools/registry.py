@@ -28,7 +28,7 @@ import inspect
 import typing
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, cast, overload
 
 from structlog.stdlib import BoundLogger
 
@@ -201,6 +201,14 @@ def _build_schema(
 # --- Decorator + dispatcher --------------------------------------------------
 
 
+@overload
+def tool[F: ToolHandler](fn: F, /) -> F: ...
+@overload
+def tool[F: ToolHandler](
+    *,
+    name: str | None = ...,
+    description: str | None = ...,
+) -> Callable[[F], F]: ...
 def tool[F: ToolHandler](
     fn: F | None = None,
     *,

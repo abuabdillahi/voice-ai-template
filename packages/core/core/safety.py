@@ -28,7 +28,11 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletionMessageParam
+    from openai.types.shared_params import ResponseFormatJSONSchema
 
 from core.config import Settings, get_settings
 
@@ -398,14 +402,22 @@ async def classify(
         return RedFlagResult(tier=RedFlagTier.NONE, source="classifier")
 
     client = AsyncOpenAI(api_key=resolved_settings.openai_api_key)
+    messages = cast(
+        "list[ChatCompletionMessageParam]",
+        [
+            {"role": "system", "content": CLASSIFIER_SYSTEM_PROMPT},
+            {"role": "user", "content": text},
+        ],
+    )
+    response_format = cast(
+        "ResponseFormatJSONSchema",
+        {"type": "json_schema", "json_schema": _CLASSIFIER_RESPONSE_SCHEMA},
+    )
     try:
         response = await client.chat.completions.create(
             model=resolved_settings.safety_classifier_model,
-            messages=[
-                {"role": "system", "content": CLASSIFIER_SYSTEM_PROMPT},
-                {"role": "user", "content": text},
-            ],
-            response_format={"type": "json_schema", "json_schema": _CLASSIFIER_RESPONSE_SCHEMA},
+            messages=messages,
+            response_format=response_format,
             max_tokens=120,
             temperature=0.0,
         )

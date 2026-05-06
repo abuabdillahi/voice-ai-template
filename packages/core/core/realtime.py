@@ -70,7 +70,7 @@ def create_safety_tts(
     settings: Settings | None = None,
     *,
     voice: str | None = None,
-) -> TTS:
+) -> TTS[Any]:
     """Build the TTS attached to the AgentSession for safety scripts.
 
     The realtime model is speech-to-speech and has no separate TTS
