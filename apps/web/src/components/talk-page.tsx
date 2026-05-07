@@ -1,44 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Mic, MicOff, PhoneOff, Shield, ChevronDown } from 'lucide-react';
-import {
-  Room,
-  RoomEvent,
-  ConnectionState,
-  Track,
-  type RemoteTrack,
-  type Participant,
-} from 'livekit-client';
 
 import { apiFetch } from '@/lib/api';
-import { supabase } from '@/lib/supabase';
 import { useLivekitTranscript, type TranscriptEntry } from '@/lib/livekit-transcript';
 import { TRIAGE_SLOTS, useLivekitTriageState } from '@/lib/livekit-triage-state';
 import { useSessionEndSignal, type SessionEndSignal } from '@/lib/livekit-session-end';
+import { useVoiceSession } from '@/lib/use-voice-session';
+import { useVoiceState } from '@/lib/use-voice-state';
+import { useSessionSnapshot } from '@/lib/use-session-snapshot';
 import { Button } from '@/components/ui/button';
 import { useSmViewport } from '@/lib/use-viewport';
 import { TriageSlots } from '@/components/triage-slots';
 import { TranscriptCard, transcriptItemsFromEntries } from '@/components/transcript-card';
 import { VoiceDot, voiceStateCopy, type VoiceState } from '@/components/voice-dot';
-import {
-  SessionSummary,
-  clearSessionSummary,
-  stashSessionSummary,
-} from '@/components/session-summary';
+import { SessionSummary, clearSessionSummary } from '@/components/session-summary';
 import { cn } from '@/lib/utils';
-
-interface LivekitTokenResponse {
-  token: string;
-  url: string;
-  room: string;
-}
 
 interface PriorSessionStatusResponse {
   is_returning_user: boolean;
 }
-
-type Status = 'idle' | 'connecting' | 'connected' | 'disconnected';
 
 const EXAMPLE_PROMPTS = [
   'My wrist tingles when I type',
@@ -97,313 +78,41 @@ const HOW_IT_WORKS = [
  * saw the card but never heard the routing message.
  */
 export function TalkPage() {
-  const [room, setRoom] = useState<Room | null>(null);
-  const [status, setStatus] = useState<Status>('idle');
-  const [micEnabled, setMicEnabled] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [agentSpeaking, setAgentSpeaking] = useState(false);
-  // Latches `true` the first time the agent speaks in a session, and
-  // resets on disconnect / fresh connect. Used to discriminate the
-  // brief connecting → first-greeting window from the regular
-  // listening state — we don't want the connection bar to read "I'm
-  // listening, take your time" before Sarjy has even said hello,
-  // because it tempts users to talk over the opener.
-  const [agentHasSpoken, setAgentHasSpoken] = useState(false);
-  useEffect(() => {
-    if (agentSpeaking) setAgentHasSpoken(true);
-  }, [agentSpeaking]);
-  const transcript = useLivekitTranscript(room);
-  const triageSlots = useLivekitTriageState(room);
-  const sessionEndSignal = useSessionEndSignal(room);
-  const navigate = useNavigate();
-
-  const roomRef = useRef<Room | null>(null);
-  useEffect(() => {
-    roomRef.current = room;
-  }, [room]);
-
-  // Trailing quiet-window timer for the VoiceDot "speaking" debounce.
-  // See the ActiveSpeakersChanged handler below for why this exists.
-  const speakingResetTimerRef = useRef<number | null>(null);
-
-  // When an escalation `lk.session-end` arrives we hand off to the
-  // dedicated `/session-end` route immediately, but the agent's
-  // routing-script audio is still being delivered over the live
-  // WebRTC connection — calling `room.disconnect()` on unmount would
-  // cut it mid-sentence. We mirror the signal into a ref so the
-  // unmount cleanup can read the latest value and skip the disconnect
-  // when a session-end is in flight. The server tears the room down
-  // naturally once the script finishes (`_ESCALATION_AUDIO_DRAIN_SECONDS`
-  // on the agent side); the LiveKit client's TrackUnsubscribed handler
-  // detaches the `<audio>` element when that lands.
-  const skipDisconnectOnUnmountRef = useRef(false);
-  useEffect(() => {
-    skipDisconnectOnUnmountRef.current = !!sessionEndSignal;
-  }, [sessionEndSignal]);
-
-  useEffect(() => {
-    return () => {
-      if (!skipDisconnectOnUnmountRef.current) {
-        void roomRef.current?.disconnect();
-      }
-      if (speakingResetTimerRef.current !== null) {
-        window.clearTimeout(speakingResetTimerRef.current);
-      }
-    };
-  }, []);
-
-  const connectMutation = useMutation({
-    mutationFn: async (): Promise<{ room: Room; info: LivekitTokenResponse }> => {
-      // One-click start: request the mic permission *before* opening
-      // the LiveKit transport so a denied prompt fails fast instead of
-      // leaving the user in a "connected but silent" state. The probe
-      // track is released immediately — `setMicrophoneEnabled(true)`
-      // below is what publishes for real.
-      try {
-        const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
-        probe.getTracks().forEach((t) => t.stop());
-      } catch (err) {
-        const name = (err as DOMException | null)?.name;
-        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-          throw new Error('Microphone permission denied. Allow mic access and try again.');
-        }
-        throw new Error('Could not access your microphone. Check your input device.');
-      }
-
-      const info = await apiFetch<LivekitTokenResponse>('/livekit/token', {
-        method: 'POST',
-        body: {},
-      });
-      const lkRoom = new Room({ adaptiveStream: true, dynacast: true });
-      lkRoom.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
-        if (state === ConnectionState.Connected) setStatus('connected');
-        else if (state === ConnectionState.Connecting) setStatus('connecting');
-        else if (state === ConnectionState.Reconnecting) setStatus('connecting');
-        else if (state === ConnectionState.Disconnected) setStatus('disconnected');
-      });
-      // Attach every remote audio track to a hidden <audio> element so
-      // the browser actually plays the agent's voice. LiveKit subscribes
-      // tracks automatically, but it does not auto-play — without this
-      // hook the assistant's transcript appears but no sound comes out.
-      lkRoom.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
-        if (track.kind !== Track.Kind.Audio) return;
-        const element = track.attach();
-        element.style.display = 'none';
-        document.body.appendChild(element);
-      });
-      lkRoom.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
-        if (track.kind !== Track.Kind.Audio) return;
-        track.detach().forEach((el) => el.remove());
-      });
-      // VoiceDot "speaking" derives from LiveKit's server-side VAD via
-      // ActiveSpeakersChanged, not from `<audio>` playback events.
-      // The audio element is "playing" continuously once attached
-      // (silence is still playback), so its events fire constantly and
-      // would leave the indicator stuck on "speaking". The active-
-      // speakers list, by contrast, is the model the LiveKit room
-      // actually uses to decide who has the floor. The agent emits no
-      // dedicated voice-state topic yet; this is the closest accurate
-      // signal we have without a wire-protocol change.
-      //
-      // The active-speakers list updates every few hundred ms during
-      // speech, dropping the agent during natural inter-sentence
-      // pauses. Without smoothing the indicator flickers on/off as the
-      // agent talks in chunks. We therefore latch "speaking" to true
-      // on any rising edge and only flip it back to false after a
-      // trailing quiet window — long enough to bridge a sentence
-      // boundary, short enough that the user notices when the turn
-      // actually completes. A user-side rising edge collapses the
-      // window immediately so interrupts don't leave the indicator
-      // stuck on for ~800ms after the agent has yielded.
-      lkRoom.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
-        const localId = lkRoom.localParticipant.identity;
-        const agentTalking = speakers.some((p) => p.identity !== localId);
-        const userTalking = speakers.some((p) => p.identity === localId);
-        if (agentTalking) {
-          if (speakingResetTimerRef.current !== null) {
-            window.clearTimeout(speakingResetTimerRef.current);
-            speakingResetTimerRef.current = null;
-          }
-          setAgentSpeaking(true);
-          return;
-        }
-        if (userTalking) {
-          if (speakingResetTimerRef.current !== null) {
-            window.clearTimeout(speakingResetTimerRef.current);
-            speakingResetTimerRef.current = null;
-          }
-          setAgentSpeaking(false);
-          return;
-        }
-        if (speakingResetTimerRef.current !== null) return;
-        speakingResetTimerRef.current = window.setTimeout(() => {
-          speakingResetTimerRef.current = null;
-          setAgentSpeaking(false);
-        }, 800);
-      });
-      await lkRoom.connect(info.url, info.token);
-
-      // Push the live Supabase access token as a participant attribute
-      // so the agent worker can read it for RLS-scoped writes. The
-      // agent reads `supabase_access_token` via `_resolve_supabase_token`
-      // and listens for attribute changes; below we re-push on every
-      // Supabase TOKEN_REFRESHED event so long sessions stay
-      // authenticated past the 1h JWT TTL.
-      const pushToken = async (): Promise<void> => {
-        const { data } = await supabase.auth.getSession();
-        const token = data.session?.access_token;
-        if (token) {
-          await lkRoom.localParticipant.setAttributes({ supabase_access_token: token });
-        }
-      };
-      await pushToken();
-      const { data: authSub } = supabase.auth.onAuthStateChange((event) => {
-        if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
-          void pushToken();
-        }
-      });
-      lkRoom.once(RoomEvent.Disconnected, () => {
-        authSub.subscription.unsubscribe();
-      });
-
-      // Auto-unmute on connect so the user only has to make one
-      // decision ("start talking"). The previous Connect-then-Unmute
-      // flow was a friction tax that left users staring at a connected
-      // session with a muted mic and no obvious recovery.
-      await lkRoom.localParticipant.setMicrophoneEnabled(true);
-
-      return { room: lkRoom, info };
-    },
-    onMutate: () => {
-      setError(null);
-      setStatus('connecting');
-      // Drop any stale stash from a prior session so a refresh of
-      // `/session-end` after starting a fresh one redirects home
-      // rather than resurfacing the old summary.
-      clearSessionSummary();
-    },
-    onSuccess: ({ room: lkRoom }) => {
-      setRoom(lkRoom);
-      setMicEnabled(true);
-      setStatus('connected');
-    },
-    onError: (err: unknown) => {
-      setError(err instanceof Error ? err.message : 'Failed to connect.');
-      setStatus('idle');
-    },
+  const session = useVoiceSession();
+  const transcript = useLivekitTranscript(session.room);
+  const triageSlots = useLivekitTriageState(session.room);
+  const sessionEndSignal = useSessionEndSignal(session.room);
+  const { voiceState, agentSpeaking } = useVoiceState(
+    session.room,
+    session.micEnabled,
+    session.status,
+  );
+  const { snapshot, endedLocally, endLocally } = useSessionSnapshot({
+    room: session.room,
+    transcript,
+    triageSlots,
+    signal: sessionEndSignal,
+    setSkipDisconnectOnUnmount: session.setSkipDisconnectOnUnmount,
   });
 
-  const [endedLocally, setEndedLocally] = useState(false);
-  // Snapshot the transcript + triage state at the moment the session
-  // ends — either the agent's `lk.session-end` signal arrives, or the
-  // user clicks End session. The live `useLivekitTranscript` and
-  // `useLivekitTriageState` hooks reset to `[]` / `{}` on
-  // `RoomEvent.Disconnected`, which fires shortly after either trigger.
-  // Without a snapshot the frozen view would render empty transcript
-  // and triage cards as soon as the WebRTC teardown lands — losing the
-  // most useful artifact of the session.
-  const [snapshot, setSnapshot] = useState<{
-    transcript: TranscriptEntry[];
-    triageSlots: Record<string, string>;
-  } | null>(null);
-  const liveRef = useRef<{ transcript: TranscriptEntry[]; triageSlots: Record<string, string> }>({
-    transcript: [],
-    triageSlots: {},
-  });
-  useEffect(() => {
-    liveRef.current = { transcript, triageSlots };
-  }, [transcript, triageSlots]);
-
-  // Reset the "agent has spoken" latch on every fresh connect so the
-  // next session starts in the connecting state again, not in the
-  // listening state inherited from the previous one.
-  useEffect(() => {
-    if (status === 'connecting') setAgentHasSpoken(false);
-  }, [status]);
-
-  const disconnect = async (): Promise<void> => {
-    // Snapshot the live transcript + triage state *before* the
-    // WebRTC teardown clears them (the `useLivekitTranscript` and
-    // `useLivekitTriageState` hooks reset on Disconnected). Setting
-    // `endedLocally` flips the render branch into the same
-    // FrozenSessionView the escalation path uses — same summary
-    // banner, same frozen transcript, same clinician-suggestions
-    // recap if the agent surfaced any. The synthesized signal carries
-    // `reason: 'user_ended'` and no tier so the EndOfConversationCard
-    // renders neutral copy instead of the routing scripts.
-    if (!snapshot) {
-      setSnapshot({
-        transcript: liveRef.current.transcript,
-        triageSlots: liveRef.current.triageSlots,
-      });
-    }
-    setEndedLocally(true);
-    await room?.disconnect();
-    setRoom(null);
-    setMicEnabled(false);
-    setAgentSpeaking(false);
-    setStatus('disconnected');
+  const onStart = (): void => {
+    // Drop any stale stash from a prior session so a refresh of
+    // `/session-end` after starting a fresh one redirects home
+    // rather than resurfacing the old summary.
+    clearSessionSummary();
+    session.connect();
   };
 
-  const toggleMic = async (): Promise<void> => {
-    if (!room) return;
-    const next = !micEnabled;
-    await room.localParticipant.setMicrophoneEnabled(next);
-    setMicEnabled(next);
+  const onDisconnect = async (): Promise<void> => {
+    endLocally();
+    await session.disconnect();
   };
-
-  const isConnecting = status === 'connecting' || connectMutation.isPending;
-
-  const voiceState: VoiceState = !room
-    ? 'idle'
-    : !micEnabled
-      ? 'muted'
-      : agentSpeaking
-        ? 'speaking'
-        : agentHasSpoken
-          ? 'listening'
-          : 'connecting';
-
-  useEffect(() => {
-    if (sessionEndSignal && !snapshot) {
-      setSnapshot({
-        transcript: liveRef.current.transcript,
-        triageSlots: liveRef.current.triageSlots,
-      });
-    }
-  }, [sessionEndSignal, snapshot]);
-
-  // Hand off to the dedicated `/session-end` route as soon as a
-  // snapshot is ready. Two trigger conditions, two timings:
-  //   - Escalation (`sessionEndSignal`): navigate IMMEDIATELY, even
-  //     though the agent is still speaking the routing script. The
-  //     unmount-cleanup ref above keeps the live Room alive so the
-  //     `<audio>` element on `document.body` continues to play.
-  //   - User-ended (`endedLocally`): wait for `room === null`. The
-  //     End-session click already calls `room.disconnect()` and
-  //     awaits it, then sets `room = null`; by the time this effect
-  //     runs the WebRTC teardown is complete.
-  // Routing through a real URL lets the AppHeader's Sarjy → home link
-  // actually leave the summary instead of resetting same-page state.
-  const navigatedRef = useRef(false);
-  useEffect(() => {
-    if (navigatedRef.current) return;
-    if (!(sessionEndSignal || endedLocally)) return;
-    if (!snapshot) return;
-    if (endedLocally && room) return;
-    navigatedRef.current = true;
-    stashSessionSummary({
-      signal: sessionEndSignal ?? { reason: 'user_ended' },
-      transcript: snapshot.transcript,
-      triageSlots: snapshot.triageSlots,
-    });
-    void navigate({ to: '/session-end' });
-  }, [sessionEndSignal, endedLocally, room, snapshot, navigate]);
 
   // While the audio script is still draining (escalation) the room is
   // still up — render the summary inline so the user sees the
   // routing copy alongside the audio. For user-ended this branch is a
-  // brief flash before the navigate effect above takes over.
+  // brief flash before the navigate effect inside useSessionSnapshot
+  // takes over.
   if (sessionEndSignal || endedLocally) {
     const effectiveSignal: SessionEndSignal = sessionEndSignal ?? { reason: 'user_ended' };
     const frozen = snapshot ?? { transcript, triageSlots };
@@ -416,13 +125,9 @@ export function TalkPage() {
     );
   }
 
-  if (!room) {
+  if (!session.room) {
     return (
-      <PreConnectView
-        isConnecting={isConnecting}
-        error={error}
-        onStart={() => connectMutation.mutate()}
-      />
+      <PreConnectView isConnecting={session.isConnecting} error={session.error} onStart={onStart} />
     );
   }
 
@@ -430,11 +135,11 @@ export function TalkPage() {
     <InSessionView
       voiceState={voiceState}
       agentSpeaking={agentSpeaking}
-      micEnabled={micEnabled}
+      micEnabled={session.micEnabled}
       transcript={transcript}
       triageSlots={triageSlots}
-      onToggleMic={toggleMic}
-      onDisconnect={disconnect}
+      onToggleMic={session.toggleMic}
+      onDisconnect={onDisconnect}
     />
   );
 }

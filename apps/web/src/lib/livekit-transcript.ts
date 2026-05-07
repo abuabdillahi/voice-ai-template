@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
-import { RoomEvent, type Room } from 'livekit-client';
+import { useCallback, useState } from 'react';
+import { type Room } from 'livekit-client';
+
+import { useDataChannelTopic } from '@/lib/livekit-data-channel';
 
 /**
  * Wire shape of the `lk.triage-state` data-channel topic. The agent
@@ -48,6 +50,8 @@ interface ToolCallPayload {
   error?: boolean;
 }
 
+const DEDUP_WINDOW_MS = 5_000;
+
 /**
  * Subscribes to the LiveKit Agents transcript topics and returns a
  * rolling list of transcript entries. The hook listens to two topics:
@@ -63,74 +67,65 @@ interface ToolCallPayload {
  */
 export function useLivekitTranscript(room: Room | null): TranscriptEntry[] {
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
+  const reset = useCallback(() => setEntries([]), []);
 
-  useEffect(() => {
-    if (!room) {
-      setEntries([]);
-      return;
-    }
+  const upsert = useCallback((entry: TranscriptEntry): void => {
+    setEntries((prev) => {
+      // Primary key: stream id. Same id ⇒ same utterance, later
+      // chunk overwrites earlier (the live-typing case).
+      const byId = prev.findIndex((e) => e.id === entry.id);
+      if (byId !== -1) {
+        const copy = prev.slice();
+        copy[byId] = { ...entry, createdAt: prev[byId].createdAt };
+        return copy;
+      }
+      // Secondary key: same role + same text within a short window.
+      // The realtime model emits the user's transcription twice for
+      // each utterance (server VAD + realtime model echo) under
+      // different stream ids; without this collapse, every user line
+      // shows up duplicated. Tool-call entries are exempt because
+      // their `id` is already unique per dispatch.
+      if (entry.role !== 'tool-call') {
+        const trimmed = entry.text.trim();
+        const recent = prev.findIndex(
+          (e) =>
+            e.role === entry.role &&
+            e.text.trim() === trimmed &&
+            entry.createdAt - e.createdAt < DEDUP_WINDOW_MS,
+        );
+        if (recent !== -1) return prev;
+      }
+      return [...prev, entry];
+    });
+  }, []);
 
-    const DEDUP_WINDOW_MS = 5_000;
-
-    const upsert = (entry: TranscriptEntry): void => {
-      setEntries((prev) => {
-        // Primary key: stream id. Same id ⇒ same utterance, later
-        // chunk overwrites earlier (the live-typing case).
-        const byId = prev.findIndex((e) => e.id === entry.id);
-        if (byId !== -1) {
-          const copy = prev.slice();
-          copy[byId] = { ...entry, createdAt: prev[byId].createdAt };
-          return copy;
-        }
-        // Secondary key: same role + same text within a short window.
-        // The realtime model emits the user's transcription twice for
-        // each utterance (server VAD + realtime model echo) under
-        // different stream ids; without this collapse, every user line
-        // shows up duplicated. Tool-call entries are exempt because
-        // their `id` is already unique per dispatch.
-        if (entry.role !== 'tool-call') {
-          const trimmed = entry.text.trim();
-          const recent = prev.findIndex(
-            (e) =>
-              e.role === entry.role &&
-              e.text.trim() === trimmed &&
-              entry.createdAt - e.createdAt < DEDUP_WINDOW_MS,
-          );
-          if (recent !== -1) return prev;
-        }
-        return [...prev, entry];
-      });
-    };
-
-    const handleTranscript = async (
+  const localIdentity = room?.localParticipant.identity;
+  const handleTranscript = useCallback(
+    async (
       reader: {
-        info: { id?: string; attributes?: Record<string, string>; topic?: string };
+        info: { id?: string; attributes?: Record<string, string> };
         readAll: () => Promise<string>;
       },
-      participantInfo: { identity: string },
+      participant: { identity: string },
     ): Promise<void> => {
-      if (reader.info.topic !== TRANSCRIPTION_TOPIC) return;
       const text = await reader.readAll();
       const finalAttr = reader.info.attributes?.['lk.transcription_final'];
       const isFinal = finalAttr === 'true';
-      const id = reader.info.id ?? `${participantInfo.identity}-${Date.now()}`;
+      const id = reader.info.id ?? `${participant.identity}-${Date.now()}`;
       const role: 'user' | 'assistant' =
-        participantInfo.identity === room.localParticipant.identity ? 'user' : 'assistant';
-
+        participant.identity === localIdentity ? 'user' : 'assistant';
       upsert({ id, role, text, final: isFinal, createdAt: Date.now() });
-    };
+    },
+    [upsert, localIdentity],
+  );
 
-    const handleToolCall = async (reader: {
-      info: { id?: string; attributes?: Record<string, string>; topic?: string };
-      readAll: () => Promise<string>;
-    }): Promise<void> => {
-      if (reader.info.topic !== TOOL_CALLS_TOPIC) return;
+  const handleToolCall = useCallback(
+    async (reader: { readAll: () => Promise<string> }): Promise<void> => {
       const raw = await reader.readAll();
       let payload: ToolCallPayload | null = null;
       try {
         payload = JSON.parse(raw) as ToolCallPayload;
       } catch {
-        // Malformed payloads are dropped; the agent always emits JSON.
         return;
       }
       if (!payload) return;
@@ -144,35 +139,12 @@ export function useLivekitTranscript(room: Room | null): TranscriptEntry[] {
         error: Boolean(payload.error),
         createdAt: Date.now(),
       });
-    };
+    },
+    [upsert],
+  );
 
-    // Some livekit-client versions expose registerTextStreamHandler;
-    // the cast keeps us source-compatible without depending on a
-    // specific minor.
-    type StreamReader = {
-      info: { id?: string; attributes?: Record<string, string>; topic?: string };
-      readAll: () => Promise<string>;
-    };
-    type StreamHandler = (
-      reader: StreamReader,
-      participantInfo: { identity: string },
-    ) => Promise<void>;
-    const r = room as unknown as {
-      registerTextStreamHandler?: (topic: string, handler: StreamHandler) => void;
-      unregisterTextStreamHandler?: (topic: string) => void;
-    };
-    r.registerTextStreamHandler?.(TRANSCRIPTION_TOPIC, handleTranscript);
-    r.registerTextStreamHandler?.(TOOL_CALLS_TOPIC, handleToolCall as unknown as StreamHandler);
-
-    const reset = (): void => setEntries([]);
-    room.on(RoomEvent.Disconnected, reset);
-
-    return () => {
-      r.unregisterTextStreamHandler?.(TRANSCRIPTION_TOPIC);
-      r.unregisterTextStreamHandler?.(TOOL_CALLS_TOPIC);
-      room.off(RoomEvent.Disconnected, reset);
-    };
-  }, [room]);
+  useDataChannelTopic(room, TRANSCRIPTION_TOPIC, handleTranscript, { onDisconnect: reset });
+  useDataChannelTopic(room, TOOL_CALLS_TOPIC, handleToolCall);
 
   return entries;
 }
