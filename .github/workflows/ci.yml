@@ -59,7 +59,7 @@ jobs:
         run: pnpm exec prettier --check .
 
       - name: TypeScript check
-        run: pnpm --filter @voice-ai/web exec tsc --noEmit
+        run: pnpm --filter @sarjy/web exec tsc --noEmit
 
   tests:
     name: Python tests (unit + integration)

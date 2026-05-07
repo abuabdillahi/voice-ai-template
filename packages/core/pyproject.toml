@@ -1,7 +1,7 @@
 [project]
 name = "core"
 version = "0.0.0"
-description = "Shared domain logic for the voice AI template"
+description = "Shared domain logic for Sarjy"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115",

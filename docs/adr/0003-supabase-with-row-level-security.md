@@ -48,4 +48,4 @@ For verification: the template uses Supabase's JWT Signing Keys (asymmetric ES25
 - `packages/core/core/auth.py` — JWT verification (post-ADR-0005).
 - `packages/core/core/supabase.py` — per-request token-scoped client builder.
 - `supabase/migrations/*.sql` — every user-scoped table carries RLS.
-- `.scratch/voice-ai-template/PRD.md` "Identity, database, and memory" section.
+- `.scratch/sarjy/PRD.md` "Identity, database, and memory" section.

@@ -1,25 +1,23 @@
-# Voice AI Assistant Template
+# Sarjy
 
-A monorepo template for building voice AI assistant web applications. Real-time conversational voice via LiveKit Agents, defaulting to OpenAI Realtime as the speech-to-speech model. Backend in FastAPI, frontend in Vite + React.
+Voice-first triage assistant for office-strain symptoms — wrist tingling, eye strain, tension headaches, neck strain, lumbar pain. The user clicks Connect, talks, and Sarjy walks them through an OPQRST-style symptom interview. The session ends in one of three ways: a self-care routine, a clinician referral surfaced via OpenStreetMap, or — rarely — an emergent/urgent routing message.
 
-The full specification lives at [`.scratch/voice-ai-template/PRD.md`](./.scratch/voice-ai-template/PRD.md). Implementation is broken down into independently-grabbable issues at [`.scratch/voice-ai-template/issues/`](./.scratch/voice-ai-template/issues/).
+Sarjy is **explicitly not a doctor**. The product layer enforces a deliberately narrow scope (five conditions, defined in [`packages/core/core/conditions.py`](./packages/core/core/conditions.py)) and routes anything outside that scope away.
 
-## Status
+The runtime stack is real-time conversational voice via LiveKit Agents on top of OpenAI's `gpt-realtime` speech-to-speech model. The backend is FastAPI + Supabase; the frontend is Vite + React + TanStack Router with shadcn/ui.
 
-Foundation + auth tracer + voice loop tracer + tool-calling tracer + conversation persistence tracer + triage product layer. Workspace skeleton, tooling, Docker, the Supabase auth slice, the LiveKit + OpenAI Realtime voice loop, the tool-registration / dispatch layer, persisted conversation transcripts with the history pages, and the office-strain triage tools (`record_symptom`, `get_differential`, `recommend_treatment`, `escalate`, `find_clinician`) are in place.
+## What's in the box
 
-## Conversation history
+- **Voice loop** — LiveKit + OpenAI Realtime, with a separate `gpt-4o-mini-tts` attached for the safety-script playback (see [ADR 0007](./docs/adr/0007-tts-attached-safety-escalation.md)).
+- **OPQRST triage** — `record_symptom`, `get_differential`, `recommend_treatment` tools backed by the static condition catalogue.
+- **Safety floor** — a server-side regex + classifier screen runs in parallel with the model on every committed user utterance. Either tier-1/tier-2 hit triggers a deterministic teardown coordinated by `core.escalation.EscalationCoordinator`: scripted message verbatim, audit row, session-end signal, room delete.
+- **Clinician finder** — `find_clinician` tool that geocodes via Nominatim and queries Overpass for nearby healthcare amenities (radius ladder 10 → 25 → 50 km).
+- **Conversation history** — every session is persisted as a `conversations` row plus per-turn `messages` rows, with a one-line LLM-generated summary on close. Surfaces at `/history` and `/history/:id`.
+- **Cross-session recall** — the most recent prior `identified_condition_id` + free-text recall context is injected into the system prompt at session start so a returning user gets a short refresher instead of the full disclaimer.
 
-Every voice conversation is persisted as a `conversations` row plus one `messages` row per turn (user, assistant, tool). The agent worker writes the rows mid-session via `core.conversations`; on session end an LLM-generated one-line summary is attached when the conversation has at least three messages. The web app exposes the transcripts at:
+For the runtime architecture in one read, see [`docs/architecture.md`](./docs/architecture.md). For the design decisions behind the choices below, see [`docs/adr/`](./docs/adr/).
 
-- `/history` — list of past conversations with their summary and message count.
-- `/history/:id` — full transcript for a single conversation, with role-styled bubbles and timestamps. Tool calls render as a third message type carrying the tool name, arguments, and result.
-
-Audio recordings are explicitly **out of scope** per the PRD — only the text transcripts are persisted. RLS on both `conversations` and `messages` enforces user isolation at the database level.
-
-## Getting started
-
-### Prerequisites
+## Prerequisites
 
 - **[uv](https://docs.astral.sh/uv/)** ≥ 0.4 — Python package and workspace manager
 - **[pnpm](https://pnpm.io/)** ≥ 9 — Node package manager (Corepack or Volta both work)
@@ -32,7 +30,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 curl https://get.volta.sh | bash && volta install node pnpm
 ```
 
-### Install
+## Install
 
 From the repo root:
 
@@ -43,9 +41,7 @@ uv sync             # installs Python deps and links workspace packages
 
 ### One-time hook setup
 
-After cloning, install the git hooks so commits and pushes are automatically
-formatted, linted, type-checked, and rejected if the commit message is not in
-[Conventional Commits](https://www.conventionalcommits.org) format:
+After cloning, install the git hooks so commits and pushes are automatically formatted, linted, type-checked, and rejected if the commit message is not in [Conventional Commits](https://www.conventionalcommits.org) format:
 
 ```sh
 uv run pre-commit install --install-hooks
@@ -53,8 +49,7 @@ uv run pre-commit install --hook-type pre-push
 uv run pre-commit install --hook-type commit-msg
 ```
 
-Run `uv run pre-commit run --all-files` once after install to confirm
-everything is wired up.
+Run `uv run pre-commit run --all-files` once after install to confirm everything is wired up.
 
 ### Common commands
 
@@ -83,7 +78,7 @@ cp .env.example .env
 docker compose up
 
 # In a separate terminal:
-pnpm --filter @voice-ai/web dev
+pnpm --filter @sarjy/web dev
 ```
 
 For a production-shaped stack (api + agent + nginx-served web bundle):
@@ -92,13 +87,15 @@ For a production-shaped stack (api + agent + nginx-served web bundle):
 docker compose -f docker-compose.prod.yml up --build
 ```
 
-The production compose adds the nginx-served web bundle on top of the dev service graph. LiveKit itself is **not** in the compose stack — both dev and prod dial a hosted LiveKit Cloud project via `LIVEKIT_URL`. Use a separate Cloud project (or at minimum a separate API key/secret pair) for production traffic.
+LiveKit itself is **not** in the compose stack — both dev and prod dial a hosted LiveKit Cloud project via `LIVEKIT_URL`. Self-hosting is supported (a fork only needs to flip the URL and add `livekit/livekit-server` as a service) but is not the default posture.
 
-## Auth setup
+## Environment setup
 
-The template uses Supabase for auth, Postgres, and (later) pgvector. Two flavours are supported:
+### Supabase (auth + Postgres)
 
-### Option A — Supabase Cloud (zero-setup, free tier)
+Sarjy uses Supabase for auth, Postgres, and Row-Level Security. Two flavours are supported:
+
+#### Option A — Supabase Cloud (zero-setup, free tier)
 
 1. Create a project at <https://supabase.com>.
 2. From **Project Settings → API** copy the **Project URL** and the **publishable key**. Paste them into `.env`:
@@ -111,23 +108,19 @@ The template uses Supabase for auth, Postgres, and (later) pgvector. Two flavour
    VITE_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
    ```
 
-   JWT verification uses the project's JWKS endpoint at `{SUPABASE_URL}/auth/v1/.well-known/jwks.json` — no `JWT_SECRET` required. (The legacy `SUPABASE_ANON_KEY` env var is still accepted as an alias for the publishable key, so `.env` files cloned before the 2026 rename keep working.)
+   JWT verification uses the project's JWKS endpoint at `{SUPABASE_URL}/auth/v1/.well-known/jwks.json` — no `JWT_SECRET` required. (The legacy `SUPABASE_ANON_KEY` env var is still accepted as an alias for the publishable key.)
 
 3. (Optional) In **Authentication → Providers → Email** disable "Confirm email" if you want sign-ups to work without an SMTP server.
 
-### Option B — Supabase local (self-hosted via the CLI)
+#### Option B — Supabase local (self-hosted via the CLI)
 
 1. Install the [Supabase CLI](https://supabase.com/docs/guides/cli).
 2. From the repo root run `supabase start`. The CLI prints the local URL and publishable key — paste them into `.env` and the matching `VITE_SUPABASE_*` mirrors. Set `SUPABASE_JWKS_URL` to the local Supabase Auth JWKS URL the CLI prints if it differs from the standard `/auth/v1/.well-known/jwks.json` path.
 3. Apply the bundled migrations: `supabase db reset`.
 
-## Voice loop setup
+### LiveKit (media plane)
 
-The voice loop is real-time conversational audio over WebRTC, powered by LiveKit Agents in the backend and OpenAI Realtime as the speech-to-speech model. Two services need accounts.
-
-### LiveKit
-
-LiveKit owns the media plane (signalling + RTP). Both dev and prod use a hosted LiveKit Cloud project — there is no self-hosted media server in this template.
+LiveKit owns signalling + RTP. Both dev and prod dial a hosted LiveKit Cloud project.
 
 1. Create a project at <https://cloud.livekit.io>. The free tier is sufficient for development; provision a separate project (or at minimum a separate API key/secret pair) for production traffic.
 2. From **Project Settings → Keys** copy the **API Key**, **API Secret**, and the **WebSocket URL** (`wss://<project>.livekit.cloud`). Paste them into `.env`:
@@ -138,37 +131,45 @@ LiveKit owns the media plane (signalling + RTP). Both dev and prod use a hosted 
    LIVEKIT_API_SECRET=<api-secret>
    ```
 
-3. The agent worker dispatches into rooms automatically; no further LiveKit dashboard configuration is needed for the demo.
+3. The agent worker dispatches into rooms automatically; no further LiveKit dashboard configuration is needed.
 
-LiveKit lives behind `LIVEKIT_URL` — nothing in `apps/api`, `apps/agent`, or `apps/web` cares whether the URL points at LiveKit Cloud or a self-hosted server. A fork that needs to self-host can swap the URL and add a `livekit-server` service to the compose stack without touching application code.
+### OpenAI (realtime model + safety TTS + classifier)
 
-### OpenAI
+Sarjy uses three OpenAI surfaces: `gpt-realtime` for the conversation, `gpt-4o-mini-tts` for the safety-script playback, and `gpt-4o-mini` for the classifier half of the red-flag screen.
 
-The default realtime model is OpenAI's `gpt-realtime`.
-
-1. Create an account at <https://platform.openai.com> and provision an API key under **API keys**. The key needs access to the realtime model family.
+1. Create an account at <https://platform.openai.com> and provision an API key with access to the realtime model family.
 2. Paste it into `.env`:
 
    ```
    OPENAI_API_KEY=sk-<your-key>
    ```
 
-Subsequent slices may swap providers; the swap point is a single function in `core.realtime`. See `core/realtime.py` for the seam.
+The realtime model lives behind a single seam — `core.realtime.create_realtime_model(settings)` — so swapping providers (Gemini Live, an Anthropic real-time offering, a self-hosted pipeline) is a config change, not a refactor.
 
-### Per-user database writes from the agent
+### OpenStreetMap (clinician finder)
 
-The agent worker writes to RLS-protected tables (`conversations`, `messages`, `safety_events`) on behalf of the signed-in user. To honour those policies, it needs the user's Supabase JWT — Supabase RLS keys off `auth.uid()`, which is derived from the bearer token, not from a service role.
+The `find_clinician` tool calls Nominatim for geocoding and Overpass for healthcare-amenity queries. Both are free and require no API key, but Nominatim's [usage policy](https://operations.osmfoundation.org/policies/nominatim/) requires a contact email in the User-Agent header. Set:
 
-The token reaches the agent via the **LiveKit participant metadata**:
+```
+OSM_CONTACT_EMAIL=ops@yourdomain.example
+```
 
-1. Frontend POSTs `/livekit/token` with its Supabase access token in the `Authorization: Bearer …` header.
-2. The API route mints a LiveKit access token whose `metadata` claim holds `{"supabase_access_token": "<jwt>"}`.
-3. Frontend uses that token to join the room.
-4. Agent worker calls `_resolve_supabase_token(ctx)` at session start, parses the metadata, and forwards the JWT to every `core.conversations` / `core.safety_events` call it makes on the user's behalf.
+If `OSM_CONTACT_EMAIL` is unset the agent worker drops `find_clinician` from the registered tool set and gates the clinician-finding section out of the system prompt — the model is never told to call a tool that isn't there.
 
-**Security note.** LiveKit metadata is decodable by anyone holding the LiveKit access token. In this template that is acceptable — the same client (the signed-in user's browser) already holds the Supabase JWT in its session storage, so embedding it in the LiveKit token does not widen its exposure. **Downstream apps with stricter requirements** (shared rooms, spectator participants, third-party agents) should pass the token through a server-side relay instead — e.g. a separate `POST /agent/dispatch` call that issues the LiveKit token without metadata and forwards the Supabase JWT directly to the agent worker through a private channel.
+## Per-user database writes from the agent
 
-### Observability
+The agent worker writes to RLS-protected tables (`conversations`, `messages`, `safety_events`) on behalf of the signed-in user. To honour those policies, it needs the user's Supabase JWT — RLS keys off `auth.uid()`, which is derived from the bearer token, not from a service role.
+
+The token reaches the agent through two channels:
+
+1. **LiveKit token metadata.** The frontend POSTs `/livekit/token` with its Supabase access token. The API route mints a LiveKit access token whose `metadata` claim holds `{"supabase_access_token": "<jwt>"}`. The agent reads this at session start.
+2. **Participant attribute, live.** The frontend pushes the same token as a participant attribute and refreshes it on every Supabase `TOKEN_REFRESHED` event. The agent listens for attribute changes so long sessions stay authenticated past the 1h JWT TTL.
+
+The agent prefers the live attribute when present and falls back to the metadata claim.
+
+**Security note.** LiveKit metadata is decodable by anyone holding the LiveKit access token. For Sarjy this is acceptable — the same client (the signed-in user's browser) already holds the Supabase JWT in `localStorage`, so embedding it in the LiveKit token does not widen its exposure. Deployments with shared rooms or third-party agent participants should route the JWT through a server-side relay instead.
+
+## Observability
 
 The agent worker emits one structured `turn_metrics` JSON log line per LiveKit metric event (LLM TTFT, TTS TTFB, end-of-utterance delay, etc.) on stdout. The line carries the bound `session_id` and `user_id` contextvars, so a single conversation is grep-able from the worker's log stream:
 
@@ -196,45 +197,18 @@ A sample line:
 }
 ```
 
-This is the minimum-viable monitoring agreed in the PRD. A richer observability stack — Langfuse for LLM traces, dashboards for aggregated latency, and client-side TTFA capture — is deferred to a future iteration.
+This is the minimum-viable monitoring path. A richer stack — Langfuse for LLM traces, dashboards for aggregated latency, client-side TTFA capture — is deferred.
 
-## Adding tools
-
-Tools are the assistant's capabilities — anything beyond pure conversation. The template ships two example tools (`get_current_time`, `get_weather`) that demonstrate the canonical pattern. They live in [`packages/core/core/tools/examples.py`](./packages/core/core/tools/examples.py).
-
-To add a new tool:
-
-1. Write an async function in a module under `core.tools` (or a downstream package). Decorate it with `@tool` from `core.tools`. The decorator captures the function name, the first paragraph of the docstring, and the JSON schema derived from the type-hinted parameters.
-
-   ```python
-   from core.tools import tool
-
-   @tool
-   async def lookup_user_orders(user_email: str) -> str:
-       """Look up the most recent orders placed by a customer."""
-       ...
-   ```
-
-2. Import the module once at process start so the decorator runs. `core.tools.__init__` imports `core.tools.examples` for the bundled tools; mirror that pattern for your own module.
-
-3. **Use `httpx.AsyncClient` with an explicit timeout** for any outbound HTTP, and return a graceful natural-language string when the upstream fails. Errors raised inside a tool handler are caught by `core.tools.dispatch` and returned to the model as `{"error": ...}` so the agent verbalises the failure rather than crashing the session.
-
-4. **Announce the tool in the system prompt** so the realtime model knows it can call it. The prompt lives at the top of `apps/agent/agent/session.py` (`SYSTEM_PROMPT`). Tools that aren't mentioned in the prompt rarely get called, even when registered.
-
-The tool's first parameter may optionally be typed as `ToolContext` to receive the authenticated `User` plus a structlog logger pre-bound with `tool_name`. The dispatcher injects it automatically and hides it from the model's schema.
-
-The `core.tools` registry is the only seam adapters use to enumerate or invoke tools. The agent worker calls `all_tools()` at session start to register them with LiveKit; future API endpoints can reuse the same registry without LiveKit being involved.
-
-### Generating the typed API client
+## Generating the typed API client
 
 The frontend's `src/api/types.gen.ts` is generated from the FastAPI OpenAPI schema. Regenerate it whenever a route's request or response shape changes:
 
 ```sh
 # In one terminal, with .env populated:
-pnpm --filter @voice-ai/api dev
+pnpm --filter @sarjy/api dev
 
 # In another:
-pnpm --filter @voice-ai/web gen:api
+pnpm --filter @sarjy/web gen:api
 ```
 
 The script reads `apps/api/openapi.json` (committed for offline builds) and writes `apps/web/src/api/types.gen.ts`.
@@ -248,9 +222,12 @@ voice-ai/
 │   ├── api/              # FastAPI HTTP backend
 │   └── agent/            # LiveKit Agents worker (voice loop)
 ├── packages/
-│   └── core/             # Shared Python: domain logic, triage, safety, conversations
-├── docs/agents/          # Configuration for agent skills
-├── .scratch/             # PRDs and implementation issues (local issue tracker)
+│   └── core/             # Shared Python: triage, safety, escalation, conversations, clinician
+├── docs/
+│   ├── architecture.md   # Runtime architecture in one read
+│   ├── adr/              # Accepted architectural decisions
+│   └── GOTCHAS.md        # Symptom → fix index for known failure modes
+├── supabase/migrations/  # SQL migrations applied via supabase db push
 ├── pyproject.toml        # uv workspace root
 ├── pnpm-workspace.yaml   # pnpm workspace
 ├── turbo.json            # task pipeline

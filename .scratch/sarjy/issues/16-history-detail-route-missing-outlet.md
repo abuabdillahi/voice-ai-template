@@ -5,7 +5,7 @@ Category: bug
 
 ## Parent
 
-`.scratch/voice-ai-template/PRD.md` (issue 09 — conversation history web view)
+`.scratch/sarjy/PRD.md` (issue 09 — conversation history web view)
 
 ## What to build
 

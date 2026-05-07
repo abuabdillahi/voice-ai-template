@@ -1,1 +1,1 @@
-"""FastAPI HTTP backend for the voice AI template."""
+"""FastAPI HTTP backend for Sarjy."""

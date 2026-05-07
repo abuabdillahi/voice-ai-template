@@ -1,7 +1,7 @@
 # PRD: Voice AI Assistant Web Application Template
 
 **Type:** new project / template
-**State:** decomposed into `.scratch/voice-ai-template/issues/`
+**State:** decomposed into `.scratch/sarjy/issues/`
 
 ## Problem Statement
 
@@ -201,4 +201,4 @@ This is a greenfield repository, so no prior tests exist within the project. The
 - The template intentionally favors hosted infrastructure for development (LiveKit Cloud, Supabase Cloud are valid choices) and self-hosted infrastructure for production (the production compose runs everything in containers). Both shapes are exercised by the same application code; the difference is environment variables. This dual posture is the central design tension and is justified by the need for minute-zero developer velocity without surrendering long-term self-hostability.
 - The "what I remember about you" sidebar in the demo UI is small in code but high in signal: it makes memory visibly present from the first interaction, which prevents the common template-clone failure mode of "is the memory layer working or not?"
 - Future iterations are expected to add: a real observability stack (Langfuse first), client-side time-to-first-audio capture, end-to-end tests for the voice loop, telephony integration, mobile clients, and an evals harness for response quality.
-- Implementation issues split out from this PRD live alongside it under `.scratch/voice-ai-template/issues/`, numbered and named per the local issue-tracker convention.
+- Implementation issues split out from this PRD live alongside it under `.scratch/sarjy/issues/`, numbered and named per the local issue-tracker convention.

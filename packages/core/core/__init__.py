@@ -1,4 +1,4 @@
-"""Shared domain logic for the voice AI template.
+"""Shared domain logic for Sarjy.
 
 Modules under `core` are deep: each presents a small, stable interface and
 hides substantial complexity. Adapters (the API and the agent worker) are

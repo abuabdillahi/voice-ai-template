@@ -5,7 +5,7 @@ Category: enhancement
 
 ## Parent
 
-`.scratch/voice-ai-template/PRD.md`
+`.scratch/sarjy/PRD.md`
 
 ## What to build
 

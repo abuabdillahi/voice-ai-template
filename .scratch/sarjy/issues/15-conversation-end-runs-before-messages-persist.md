@@ -5,7 +5,7 @@ Category: bug
 
 ## Parent
 
-`.scratch/voice-ai-template/PRD.md` (issue 09 — conversation persistence tracer)
+`.scratch/sarjy/PRD.md` (issue 09 — conversation persistence tracer)
 
 ## What to build
 

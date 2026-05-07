@@ -1,6 +1,6 @@
 # PRD: Office Strain Triage Voice Agent (Ergo Triage MVP)
 
-**Type:** new product, built on the voice-ai-template scaffold
+**Type:** new product, built on the sarjy scaffold
 **Status:** needs-triage
 **State:** unscoped — implementation issues to be split out under `.scratch/ergo-triage/issues/` after triage
 
@@ -14,7 +14,7 @@ A voice-first triage tool that specialises tightly in this domain can occupy the
 
 An educational, voice-first triage agent that takes a structured symptom history for one of five office-strain presentations, surfaces a small set of conservative self-care recommendations grounded in a curated knowledge base, and escalates promptly to professional care when the conversation surfaces a symptom that warrants it. The agent is explicitly framed — in the system prompt, in the spoken script, in the UI copy — as an informational tool, not a diagnostic device, and not a substitute for a clinician.
 
-The product is built on the existing voice-ai-template repo. The realtime voice loop, LiveKit integration, Supabase auth, transcript persistence, structured logging, and Docker / compose layout are reused unchanged. The medical domain layer — knowledge base, OPQRST symptom interview, multi-layer red-flag classifier, audit log of safety triggers, scoped tool registry, scoped system prompt — is added on top. The structured-preferences and episodic-memory tools shipped by the template are retained as code but removed from the agent's prompt and tool registration; a triage flow does not benefit from cross-session "remember about you" recall and reintroduces an avoidable hallucination surface.
+The product is built on the existing sarjy repo. The realtime voice loop, LiveKit integration, Supabase auth, transcript persistence, structured logging, and Docker / compose layout are reused unchanged. The medical domain layer — knowledge base, OPQRST symptom interview, multi-layer red-flag classifier, audit log of safety triggers, scoped tool registry, scoped system prompt — is added on top. The structured-preferences and episodic-memory tools shipped by the template are retained as code but removed from the agent's prompt and tool registration; a triage flow does not benefit from cross-session "remember about you" recall and reintroduces an avoidable hallucination surface.
 
 The MVP is intentionally narrow: five conditions, a static condition knowledge base embedded in the system prompt rather than retrieved from a vector store, a single-language English voice loop, and a safety eval harness whose passing bar is 100% recall on a curated tier-1 red-flag script set. Coverage breadth, retrieval-augmented grounding, multilingual support, and clinician-reviewed content updates are explicitly deferred to post-MVP.
 

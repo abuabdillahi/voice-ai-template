@@ -8,9 +8,10 @@ tokens without going through HTTP.
 Tokens carry the LiveKit "video grants" scoped to a single room. The
 identity is the Supabase user id — LiveKit treats this as the
 participant key, so the same user reconnecting from another tab will
-collide unless the application chooses different room names. For the
-template, the convention is one room per user (``user-{userId}``)
-which is fine for the demo.
+collide unless the application chooses different room names. The API
+mints a fresh nonce per token (``user-{userId}-{nonce}``) so each
+Connect click lands in a brand-new room and triggers a fresh agent
+dispatch.
 
 When ``supabase_access_token`` is provided, it is JSON-encoded into
 the LiveKit token's ``metadata`` claim under
@@ -19,11 +20,11 @@ metadata at session start and forwards the token to RLS-scoped
 ``core`` operations so per-user database writes succeed.
 
 Security note: LiveKit metadata is visible to the participant client
-that holds the LiveKit token. That is acceptable here because the
+that holds the LiveKit token. That is acceptable for Sarjy because the
 same client already holds the Supabase JWT in its session storage —
 embedding it in the LiveKit token does not widen its exposure.
-Downstream apps with stricter requirements (e.g. shared/spectator
-participants) should pass the token via a server-side relay instead.
+Deployments with shared rooms or third-party agent participants should
+route the JWT through a server-side relay instead.
 """
 
 from __future__ import annotations

@@ -9,7 +9,7 @@
 #
 # Usage:
 #   docker compose up           # api + agent
-#   pnpm --filter @voice-ai/web dev   # web, in a separate terminal
+#   pnpm --filter @sarjy/web dev   # web, in a separate terminal
 #
 # Both services build from the repo root so they can reach the workspace
 # root pyproject.toml, uv.lock, and packages/core.

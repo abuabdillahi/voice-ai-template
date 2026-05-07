@@ -1,7 +1,7 @@
 # Gotchas
 
-Bugs that surfaced during the first end-to-end demo of this template, with
-the symptom and the fix. Aggregated so the next agent debugging the same
+Bugs that surfaced during the early end-to-end runs of Sarjy, with the
+symptom and the fix. Aggregated so the next agent debugging the same
 issue can find the answer in 30 seconds instead of an hour.
 
 Each entry: **symptom (verbatim error)** → **cause** → **fix (commit ref)**.

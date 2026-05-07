@@ -45,4 +45,4 @@ Each app is a **shallow adapter**: routes / event handlers translate transport-s
 - `packages/core/core/` — the shared package's modules.
 - `apps/api/api/routes.py` — adapter shape (HTTP → core call).
 - `apps/agent/agent/session.py::_make_livekit_tool` — adapter shape (LiveKit tool → core dispatch).
-- `.scratch/voice-ai-template/PRD.md` "Monorepo shape and shared logic" section.
+- `.scratch/sarjy/PRD.md` "Monorepo shape and shared logic" section.

@@ -55,5 +55,5 @@ Mem0's LLM is pinned to `gpt-4o-mini` (see `GOTCHAS.md` for why the default fail
 - `packages/core/core/memory.py` — mem0 wrapper (with the `gpt-4o-mini` pin).
 - `supabase/migrations/0001_user_preferences.sql`, `0003_mem0_memories.sql`.
 - `apps/agent/agent/session.py::build_system_prompt` — Known-facts inlining.
-- `.scratch/voice-ai-template/PRD.md` "Memory" section.
+- `.scratch/sarjy/PRD.md` "Memory" section.
 - `docs/GOTCHAS.md` "Memory" section.

@@ -52,4 +52,4 @@ The agent worker is unaffected — it never verified Supabase JWTs, just forward
 - `packages/core/core/jwks.py` — fetch + TTL cache.
 - `packages/core/core/auth.py` — verifier with kid-miss retry.
 - `packages/core/core/config.py` — `SUPABASE_PUBLISHABLE_KEY` with `SUPABASE_ANON_KEY` alias; optional `SUPABASE_JWKS_URL`.
-- `.scratch/voice-ai-template/issues/13-jwks-jwt-verification.md` — implementation history.
+- `.scratch/sarjy/issues/13-jwks-jwt-verification.md` — implementation history.

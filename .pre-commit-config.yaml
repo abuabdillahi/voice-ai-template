@@ -101,7 +101,7 @@ repos:
 
       - id: vitest-fast
         name: vitest run --no-coverage
-        entry: bash -c 'pnpm --filter @voice-ai/web exec vitest run --no-coverage --passWithNoTests || true'
+        entry: bash -c 'pnpm --filter @sarjy/web exec vitest run --no-coverage --passWithNoTests || true'
         language: system
         files: \.(ts|tsx|js|jsx)$
         pass_filenames: false

@@ -47,4 +47,4 @@ LiveKit deployment uses LiveKit Cloud in both dev and prod — the production co
 - `packages/core/core/realtime.py` — model factory seam.
 - `packages/core/core/livekit.py` — token issuance + agent dispatch wiring.
 - `apps/agent/agent/session.py` — worker entrypoint.
-- `.scratch/voice-ai-template/PRD.md` "Voice and realtime stack" section.
+- `.scratch/sarjy/PRD.md` "Voice and realtime stack" section.

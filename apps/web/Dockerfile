@@ -34,7 +34,7 @@ ENV VITE_API_URL=$VITE_API_URL \
 
 # `pnpm gen:api` is not run here — `apps/web/src/api/types.gen.ts` is
 # committed and regenerated explicitly via the workspace script.
-RUN pnpm --filter @voice-ai/web build
+RUN pnpm --filter @sarjy/web build
 
 # ---------- Stage 2: runtime ----------
 FROM nginx:alpine AS runtime

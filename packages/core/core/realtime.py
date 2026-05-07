@@ -6,11 +6,10 @@ duplex stream. The default is OpenAI Realtime via the livekit-agents
 OpenAI plugin.
 
 `create_realtime_model` is the **single seam** any future provider
-plugs into. Subsequent issues swap models by editing this function or
-shadowing it in a downstream fork; we deliberately do not build a
-config-driven plugin registry here. YAGNI: there is exactly one model
-in the template today, and the call site (`agent.session`) is the only
-consumer.
+plugs into. Swapping models is an edit to this function rather than
+configuration; we deliberately do not build a plugin registry. YAGNI:
+exactly one model is wired today, and the call site (`agent.session`)
+is the only consumer.
 
 The factory returns the abstract `RealtimeModel` base class from
 `livekit-agents` so call sites can stay provider-agnostic.
