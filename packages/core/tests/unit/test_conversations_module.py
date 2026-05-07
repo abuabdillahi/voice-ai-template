@@ -732,6 +732,61 @@ def test_list_recent_with_recall_without_token_raises() -> None:
         conversations.list_recent_with_recall(_USER)
 
 
+# ---------------------------------------------------------------------------
+# has_prior_session — narrow boolean used by the disclaimer-branching path
+# ---------------------------------------------------------------------------
+
+
+def test_has_prior_session_true_when_count_at_least_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """At least one conversation row → returning user, short refresher path."""
+    client = _FakeClient(data=[{"id": str(uuid4())}])
+    monkeypatch.setattr("core.conversations.get_user_client", lambda *_a, **_k: client)
+
+    assert conversations.has_prior_session(_USER, supabase_token=_TOKEN) is True
+    assert client.last_table == "conversations"
+    eq_calls = _calls_named(client, "eq")
+    assert ("user_id", str(_USER.id)) in eq_calls
+
+
+def test_has_prior_session_false_when_count_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No prior rows → first-time user, full disclaimer path."""
+    client = _FakeClient(data=[])
+    monkeypatch.setattr("core.conversations.get_user_client", lambda *_a, **_k: client)
+
+    assert conversations.has_prior_session(_USER, supabase_token=_TOKEN) is False
+
+
+def test_has_prior_session_false_on_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A transient Supabase error degrades to ``False`` (safe default — full disclaimer plays)."""
+
+    def _boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr("core.conversations.get_user_client", _boom)
+    assert conversations.has_prior_session(_USER, supabase_token=_TOKEN) is False
+
+
+def test_has_prior_session_passes_user_token_to_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Must call ``get_user_client`` with the user's access token, not the service-role key.
+
+    Mirrors the existing ``list_for_user`` / ``list_recent_with_recall``
+    token-scoping convention so RLS policies apply.
+    """
+    received: dict[str, Any] = {}
+
+    def _factory(token: str, **kwargs: Any) -> Any:
+        received["token"] = token
+        return _FakeClient(data=[])
+
+    monkeypatch.setattr("core.conversations.get_user_client", _factory)
+    conversations.has_prior_session(_USER, supabase_token=_TOKEN)
+    assert received["token"] == _TOKEN
+
+
 def test_generate_summary_and_recall_uses_injected_callable() -> None:
     msg = Message(
         id=uuid4(),

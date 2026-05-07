@@ -158,7 +158,11 @@ async def test_tier1_phrase_triggers_escalation_within_one_turn() -> None:
 
     assert session.said, "the safety hook must speak the escalation script"
     assert session.said[0] == safety.escalation_script_for(safety.RedFlagTier.EMERGENT)
-    assert session.closed is True
+    # Issue 05: the safety floor no longer calls session.aclose() —
+    # teardown is the server-side room delete (covered separately by
+    # `test_escalation_uses_room_delete_as_server_side_fallback`). With
+    # ctx=None on this legacy test, no teardown is attempted at all,
+    # and `session.closed` therefore stays False.
 
     escalation_lines = [r for r in log.records if r.get("event") == "agent.safety.escalation"]
     assert escalation_lines, "an agent.safety.escalation log line must be emitted"
@@ -306,7 +310,8 @@ async def test_safety_event_persistence_failure_does_not_block_escalation(
     await _drain()
 
     assert session.said, "the escalation script must still play"
-    assert session.closed is True
+    # Issue 05: teardown is the server-side room delete; with ctx=None
+    # here, no teardown is attempted and session.closed stays False.
     assert any(r.get("event") == "agent.safety.persist_failed" for r in log.records)
 
 
@@ -506,24 +511,31 @@ class _RealtimeFakeSession:
     ``interrupt()`` before ``say()`` — otherwise the script audio
     overlaps the model's reply.
 
-    This fake records call order and asserts that contract.
+    This fake records call order and asserts that contract. An
+    optional shared ``timeline`` list lets a test assert ordering
+    across this fake and an :class:`_RoomFake` sharing the same list.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, timeline: list[str] | None = None) -> None:
         self.listeners: dict[str, list[Any]] = {}
         self.said: list[str] = []
         self.calls: list[str] = []
         self.closed = False
+        self._timeline = timeline
 
     def on(self, event: str, handler: Any) -> None:
         self.listeners.setdefault(event, []).append(handler)
 
     async def interrupt(self) -> None:
         self.calls.append("interrupt")
+        if self._timeline is not None:
+            self._timeline.append("interrupt")
 
     async def say(self, text: str) -> None:
         self.calls.append("say")
         self.said.append(text)
+        if self._timeline is not None:
+            self._timeline.append("say")
 
     async def aclose(self) -> None:
         self.closed = True
@@ -570,13 +582,180 @@ async def test_realtime_escalation_interrupts_then_says_script(
         "say",
     ], f"interrupt must be awaited before say; got {session.calls}"
     assert session.said == [safety.escalation_script_for(safety.RedFlagTier.EMERGENT)]
-    assert session.closed is True
+    # Issue 05: teardown is now the server-side room delete; this test
+    # passes ctx=None so no teardown is attempted and session.closed
+    # stays False.
     # An info log line marks where in the timeline the TTS speak
     # occurs — the per-utterance TTS metrics line lives on a different
     # logger so it's hard to correlate without an explicit anchor.
     spoken = [r for r in log.records if r.get("event") == "agent.safety.script_spoken"]
     assert spoken, "an agent.safety.script_spoken info log must mark when say() ran"
     assert spoken[0]["tier"] == "emergent"
+
+
+class _RoomFake:
+    """Captures `send_text` calls on the room's local participant.
+
+    An optional ``timeline`` list lets a test assert ordering against
+    other fakes that share the same list — for instance proving the
+    session-end signal was sent after the script's ``say()`` returned.
+    """
+
+    def __init__(self, *, timeline: list[str] | None = None) -> None:
+        self.sent: list[dict[str, Any]] = []
+        self.local_participant = self
+        self.name = "user-abc"
+        self.disconnected = False
+        self._timeline = timeline
+
+    async def send_text(self, payload: str, *, topic: str) -> None:
+        self.sent.append({"topic": topic, "payload": payload})
+        if self._timeline is not None:
+            self._timeline.append(f"send_text:{topic}")
+
+    async def disconnect(self) -> None:
+        self.disconnected = True
+
+
+class _JobCtxFake:
+    def __init__(self, room: _RoomFake) -> None:
+        self.room = room
+
+
+@pytest.mark.asyncio
+async def test_escalation_emits_session_end_signal_after_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The frontend gets `{reason, tier}` on `lk.session-end` AFTER the script.
+
+    Audio first, then UI transition: the user hears the routing
+    message in full while still on the regular Talk page, and only
+    once the spoken script (and the audio drain) have finished does
+    the EndOfCallCard replace the transcript. Emitting before the
+    script caused the card to flash up while the audio was still
+    arriving — the user saw the routing copy but never heard it.
+    """
+    from agent.session import SESSION_END_TOPIC
+
+    assert SESSION_END_TOPIC == "lk.session-end"
+
+    monkeypatch.setattr(
+        "agent.session.core_safety_events.record",
+        lambda *a, **k: None,
+    )
+
+    # Skip the room-delete fallback to keep this test focused on emission.
+    async def _no_delete(*_a: Any, **_k: Any) -> None:
+        return None
+
+    monkeypatch.setattr("agent.session._delete_room_after_drain", _no_delete)
+    # Make the audio-drain delay near-zero so the test does not have to
+    # wait wall-clock seconds for the post-script signal to be emitted.
+    monkeypatch.setattr("agent.session._ESCALATION_AUDIO_DRAIN_SECONDS", 0.0)
+
+    timeline: list[str] = []
+    room = _RoomFake(timeline=timeline)
+    ctx = _JobCtxFake(room)
+    session = _RealtimeFakeSession(timeline=timeline)
+    log = _RecordingLogger()
+    deps = _SessionDeps(
+        user=User(id=UUID("11111111-1111-1111-1111-111111111111"), email="a@b"),
+        log=log,
+        session_id="user-abc",
+        supabase_access_token="user-jwt",
+    )
+
+    from agent.session import _wire_safety_screen as wire
+
+    wire(
+        session,
+        deps,
+        log,
+        conv_id=UUID("33333333-3333-3333-3333-333333333333"),
+        ctx=ctx,
+    )
+    _fire(session, _FakeEvent(_FakeItem(role="user", text="I am having chest pain")))
+    await _drain()
+
+    # The session-end signal was sent on the right topic with the right payload shape.
+    end_signals = [s for s in room.sent if s["topic"] == SESSION_END_TOPIC]
+    assert end_signals, "session-end signal must be emitted on lk.session-end"
+    import json as _json
+
+    payload = _json.loads(end_signals[0]["payload"])
+    assert payload == {"reason": "escalation", "tier": "emergent"}
+
+    # The structured log line is emitted with tier and reason.
+    emitted = [
+        r for r in log.records if r.get("event") == "agent.safety.session_end_signal_emitted"
+    ]
+    assert emitted, "agent.safety.session_end_signal_emitted log line must be emitted"
+    assert emitted[0]["tier"] == "emergent"
+    assert emitted[0]["reason"] == "escalation"
+
+    # Ordering check: say happens BEFORE the session-end signal so the
+    # user hears the script in full before the UI transitions.
+    say_idx = timeline.index("say")
+    signal_idx = timeline.index(f"send_text:{SESSION_END_TOPIC}")
+    assert say_idx < signal_idx, (
+        f"the escalation script must finish playing before the session-end signal "
+        f"is emitted; got timeline={timeline}"
+    )
+    assert session.said[0] == safety.escalation_script_for(safety.RedFlagTier.EMERGENT)
+
+
+@pytest.mark.asyncio
+async def test_escalation_uses_room_delete_as_server_side_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the frontend isn't there to disconnect, the server tears the room down.
+
+    `session.aclose()` only closes the AgentSession, not the LiveKit
+    room — a misbehaving frontend would leave the participant stranded.
+    The fix replaces aclose with a server-side LiveKit room delete that
+    runs after a brief audio-drain delay.
+    """
+    monkeypatch.setattr(
+        "agent.session.core_safety_events.record",
+        lambda *a, **k: None,
+    )
+
+    delete_calls: list[str] = []
+
+    async def _fake_delete(room_name: str, *, log: Any) -> None:
+        delete_calls.append(room_name)
+
+    monkeypatch.setattr("agent.session._delete_room_after_drain", _fake_delete)
+    # Make the audio-drain delay near-zero so the test does not have to
+    # wait wall-clock seconds for the teardown to reach our fake.
+    monkeypatch.setattr("agent.session._ESCALATION_AUDIO_DRAIN_SECONDS", 0.0)
+
+    room = _RoomFake()
+    ctx = _JobCtxFake(room)
+    session = _RealtimeFakeSession()
+    log = _RecordingLogger()
+    deps = _SessionDeps(
+        user=User(id=UUID("11111111-1111-1111-1111-111111111111"), email="a@b"),
+        log=log,
+        session_id="user-abc",
+        supabase_access_token="user-jwt",
+    )
+
+    from agent.session import _wire_safety_screen as wire
+
+    wire(
+        session,
+        deps,
+        log,
+        conv_id=UUID("33333333-3333-3333-3333-333333333333"),
+        ctx=ctx,
+    )
+    _fire(session, _FakeEvent(_FakeItem(role="user", text="I am having chest pain")))
+    await _drain()
+
+    assert delete_calls == [
+        "user-abc"
+    ], f"server-side room delete must run with the room name; got {delete_calls}"
 
 
 @pytest.mark.asyncio

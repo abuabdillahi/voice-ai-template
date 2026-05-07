@@ -28,10 +28,14 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
+import structlog
+
 from core.auth import User
 from core.conditions import CONDITIONS
 from core.config import Settings, get_settings
 from core.supabase import get_user_client
+
+_log = structlog.get_logger("core.conversations")
 
 # `list` shadows the builtin (public API name). Bind the original up
 # front so cast targets in the listing function still resolve correctly.
@@ -566,6 +570,46 @@ def extract_identified_condition(
     return None
 
 
+def has_prior_session(
+    user: User,
+    *,
+    supabase_token: str | None = None,
+) -> bool:
+    """Return ``True`` when the user has at least one prior conversation row.
+
+    Distinct from :func:`list_recent_with_recall` which filters to
+    *condition-bearing* rows: the disclaimer-branching signal is
+    intentionally broader. A user who connected once and dropped before
+    reaching a condition has still heard the disclaimer and should be
+    treated as returning.
+
+    Best-effort: a missing token or any raised exception degrades to
+    ``False`` (full disclaimer plays — safe default) and a structured
+    warning is emitted so the path is observable in production logs.
+    """
+    if supabase_token is None:
+        _log.warning("core.conversations.has_prior_session.no_token", user_id=str(user.id))
+        return False
+    try:
+        client = get_user_client(supabase_token)
+        response = (
+            client.table(_CONVERSATIONS_TABLE)
+            .select("id")
+            .eq("user_id", str(user.id))
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001 — degrade rather than crash
+        _log.warning(
+            "core.conversations.has_prior_session.failed",
+            user_id=str(user.id),
+            error=str(exc),
+        )
+        return False
+    rows = cast(_list[dict[str, Any]], response.data or [])
+    return len(rows) >= 1
+
+
 def list_recent_with_recall(
     user: User,
     *,
@@ -641,6 +685,7 @@ __all__ = [
     "extract_identified_condition",
     "generate_summary_and_recall",
     "get",
+    "has_prior_session",
     "list_for_user",
     "list_recent_with_recall",
     "start",

@@ -21,7 +21,7 @@ export const IN_SCOPE_CONDITIONS = [
 ];
 
 /**
- * Triage home page body. Extracted from the route file so the test
+ * Sarjy home page body. Extracted from the route file so the test
  * suite can render it without mocking out `@tanstack/react-router`'s
  * `createFileRoute`.
  *
@@ -32,13 +32,13 @@ export const IN_SCOPE_CONDITIONS = [
  * about you" surface is an avoidable hallucination risk for a
  * medical-adjacent product.
  */
-export function TriageHome() {
+export function SarjyHome() {
   const navigate = useNavigate();
 
   return (
     <div className="flex min-h-screen flex-col">
       <header className="flex items-center justify-between border-b border-[hsl(var(--border))] px-6 py-3">
-        <h1 className="text-lg font-semibold">Ergo Triage</h1>
+        <h1 className="text-lg font-semibold">Sarjy</h1>
         <nav className="flex items-center gap-2">
           <Button asChild variant="link" size="sm">
             <Link to="/history">History</Link>
@@ -73,7 +73,7 @@ export function DisclaimerBanner() {
     >
       <p className="font-semibold">This is an educational tool, not a doctor.</p>
       <p className="mt-1">
-        Ergo Triage helps you think about office-strain symptoms and what to try first. It is not a
+        Sarjy helps you think about office-strain symptoms and what to try first. It is not a
         substitute for professional medical advice. If something feels urgent, call your local
         emergency number or go to urgent care.
       </p>

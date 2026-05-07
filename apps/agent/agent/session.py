@@ -108,6 +108,23 @@ TOOL_CALLS_TOPIC = "lk.tool-calls"
 # tool-calls topic.
 TRIAGE_STATE_TOPIC = "lk.triage-state"
 
+# Data-channel topic the agent uses to signal that the session is
+# ending and why. Payload shape (JSON):
+#
+#   {"reason": "escalation", "tier": "emergent" | "urgent"}
+#
+# The frontend subscribes via `useSessionEndSignal(room)` and renders a
+# tier-aware end-of-call card in place of the transcript. The `reason`
+# field is open for future expansion (e.g. "out_of_scope") but only
+# "escalation" is emitted by the safety screen today.
+SESSION_END_TOPIC = "lk.session-end"
+
+# Audio-drain delay (seconds) between the escalation script returning
+# from `say()` and the server-side room teardown. Tuned to give the
+# realtime model's TTS time to flush its last buffer; if escalation
+# tests show clipping, raise this.
+_ESCALATION_AUDIO_DRAIN_SECONDS = 0.5
+
 # Allowlist of tool names the realtime model is permitted to call.
 # Slice 02 added `record_symptom`; slice 03 adds `get_differential`
 # and `recommend_treatment`; slice 04 adds `escalate`. Tools
@@ -121,6 +138,28 @@ TRIAGE_TOOL_NAMES: tuple[str, ...] = (
 )
 
 
+_ENGLISH_ONLY_RULE = (
+    "Respond only in English, even if the user speaks another language. "
+    "Do not translate the user's words into English in your reply; reply "
+    "as if they had spoken English. If the user speaks a non-English "
+    'language, say once, in English: "I can only respond in English — '
+    'could you repeat that in English?". If the user persists in a '
+    "non-English language, restate the constraint and stop progressing "
+    "the OPQRST interview until they switch to English."
+)
+_SARJY_SELF_INTRO_RULE = (
+    'Open every session with the literal phrase "Hi, I\'m Sarjy." '
+    "immediately before the educational-tool disclaimer. Do not vary "
+    "the wording of the self-introduction."
+)
+_SARJY_RETURNING_OPENER_RULE = (
+    'Open every session with the literal phrase "Hi, Sarjy here. '
+    "Quick reminder I'm still an educational tool, not a doctor.\" "
+    "before any prior-condition fork or the OPQRST opener. Do not "
+    "re-read the full educational-tool disclaimer; the on-screen "
+    "banner carries the visual scope reminder. Do not vary the "
+    "wording of the refresher."
+)
 _TRIAGE_OPENER_RULE = (
     "When a 'Most recent session' block is present at the top of this "
     "prompt, open the conversation by naming the prior identified "
@@ -137,7 +176,7 @@ _TRIAGE_NUMBERS_RULE = (
 )
 
 
-def _build_static_triage_prompt() -> str:
+def _build_static_triage_prompt(*, is_returning_user: bool = False) -> str:
     """Compose the static triage system prompt with the embedded knowledge base.
 
     Built lazily so the rendered ``kb_for_prompt()`` block is computed
@@ -153,6 +192,11 @@ def _build_static_triage_prompt() -> str:
     treatment specifics. Keeping the rules unconditional means a fresh
     user session and a returning-user session run under the same set
     of rules — only the prepended block changes.
+
+    When ``is_returning_user`` is ``True`` the load-bearing self-
+    introduction rule swaps to the short refresher and the full
+    "open every new conversation with this disclaimer" instruction is
+    omitted — the on-screen banner carries the visual scope reminder.
     """
     in_scope = (
         "carpal tunnel syndrome, computer vision syndrome (digital eye strain), "
@@ -164,12 +208,24 @@ def _build_static_triage_prompt() -> str:
         "paediatric symptoms, post-surgical complications, and any condition "
         "outside the five listed above"
     )
+    if is_returning_user:
+        opener_rule = _SARJY_RETURNING_OPENER_RULE
+        disclaimer_block = ""
+    else:
+        opener_rule = _SARJY_SELF_INTRO_RULE
+        disclaimer_block = (
+            "Open every new conversation with this disclaimer in your own words: "
+            "explain that you are an educational tool, not a doctor, and not a "
+            "substitute for professional medical advice.\n\n"
+        )
     return f"""\
 You are an educational triage assistant for office-strain symptoms. You are not a doctor and you are not a substitute for medical advice. You are a tool that helps the user think about whether and how to seek further care.
 
-Open every new conversation with this disclaimer in your own words: explain that you are an educational tool, not a doctor, and not a substitute for professional medical advice.
+{opener_rule}
 
-State your scope explicitly: you can talk about {in_scope}. Anything else — including {out_of_scope} — is outside what you can help with, and you will route the user to a more appropriate resource.
+{_ENGLISH_ONLY_RULE}
+
+{disclaimer_block}State your scope explicitly: you can talk about {in_scope}. Anything else — including {out_of_scope} — is outside what you can help with, and you will route the user to a more appropriate resource.
 
 Conduct the symptom interview using the OPQRST framework, asking one question at a time and listening to the user's answer before moving to the next slot:
 - O — Onset: when the symptom started and what the user was doing at the time.
@@ -245,24 +301,28 @@ def _render_prior_sessions_block(
 
 def build_triage_system_prompt(
     prior_sessions: list[core_conversations.PriorSession] | None = None,
+    *,
+    is_returning_user: bool = False,
 ) -> str:
     """Compose the per-session triage system prompt.
 
-    With ``prior_sessions`` empty (or ``None``) the rendered string is
-    byte-for-byte identical to today's static triage system prompt —
-    this is the regression-test anchor for first-time users and for
-    returning users whose prior sessions all ended without an
-    identified condition.
+    Branches:
 
-    With a non-empty list, a two-part block — "Most recent session"
-    plus optional "Earlier sessions" — is prepended to the static
-    prompt. The most recent session drives the opener; the earlier
-    ones are for pattern recognition only.
+    - ``is_returning_user=False`` and ``prior_sessions=[]`` → first-time
+      user. Rendered string includes the Sarjy self-introduction rule
+      and the full educational-tool disclaimer instruction. This is the
+      new regression anchor for first-time users.
+    - ``is_returning_user=True`` and ``prior_sessions=[]`` → returning
+      user without condition-bearing priors. The short refresher
+      replaces the full disclaimer; the OPQRST opener follows directly.
+    - ``is_returning_user=True`` and ``prior_sessions`` non-empty → the
+      short refresher composes with the existing "Most recent session"
+      prior-condition block.
 
     Pure function: tests assert the rendered string directly without
     standing up an :class:`AgentSession`.
     """
-    static_prompt = _build_static_triage_prompt()
+    static_prompt = _build_static_triage_prompt(is_returning_user=is_returning_user)
     sessions = prior_sessions or []
     if not sessions:
         return static_prompt
@@ -796,12 +856,81 @@ async def _speak_escalation_script(
         log.warning("agent.safety.say_failed", error=str(exc))
 
 
+async def _emit_session_end_signal(
+    *,
+    ctx: Any | None,
+    log: Any,
+    tier: str,
+    reason: str,
+) -> None:
+    """Push a `{reason, tier}` payload on `lk.session-end` for the frontend.
+
+    Best-effort: a transport failure here is logged but does not block
+    the rest of the escalation flow (the script still plays, the room
+    is still torn down). The end-of-call card is the *visual* affordance
+    for the routing message, not the routing itself.
+    """
+    if ctx is None:
+        return
+    room = getattr(ctx, "room", None)
+    if room is None:
+        return
+    local = getattr(room, "local_participant", None)
+    if local is None:
+        return
+    payload = json.dumps({"reason": reason, "tier": tier})
+    try:
+        await local.send_text(payload, topic=SESSION_END_TOPIC)
+        log.info("agent.safety.session_end_signal_emitted", tier=tier, reason=reason)
+    except Exception as exc:  # noqa: BLE001 — best-effort forward
+        log.warning(
+            "agent.safety.session_end_signal_failed",
+            tier=tier,
+            reason=reason,
+            error=str(exc),
+        )
+
+
+async def _delete_room_after_drain(room_name: str, *, log: Any) -> None:
+    """Delete the LiveKit room as a server-side teardown fallback.
+
+    Replaces the previous ``session.aclose()`` path on the safety
+    escalation flow. ``aclose`` only closes the AgentSession, not the
+    LiveKit room — a misbehaving frontend would leave the participant
+    stranded with a "Connected" status pill while the agent was
+    silent. This call uses the LiveKit server-side API so the teardown
+    happens regardless of what the frontend does.
+
+    Best-effort: a transport failure here is logged and swallowed —
+    the safety floor (script playback + audit-log row) has already
+    run by the time we get here.
+    """
+    try:
+        from livekit import api as lk_api
+        from livekit.protocol.room import DeleteRoomRequest
+
+        settings = get_settings()
+        livekit_api = lk_api.LiveKitAPI(
+            url=settings.livekit_url,
+            api_key=settings.livekit_api_key,
+            api_secret=settings.livekit_api_secret,
+        )
+        try:
+            await livekit_api.room.delete_room(DeleteRoomRequest(room=room_name))
+            log.info("agent.safety.room_deleted", room=room_name)
+        finally:
+            await livekit_api.aclose()
+    except Exception as exc:  # noqa: BLE001 — best-effort teardown
+        log.warning("agent.safety.room_delete_failed", room=room_name, error=str(exc))
+
+
 def _wire_safety_screen(
     session: AgentSession[None],
     deps: _SessionDeps,
     log: Any,
     *,
     conv_id: UUID | None = None,
+    ctx: Any | None = None,
 ) -> None:
     """Run the regex red-flag screen on every committed user utterance.
 
@@ -869,16 +998,38 @@ def _wire_safety_screen(
             result=result,
             utterance=text,
         )
+        # Audio first, UI transition second. The user hears the
+        # routing message in full while still on the regular Talk
+        # page; only once the script (and the audio-drain window)
+        # have completed do we emit the session-end signal so the
+        # frontend can swap in the EndOfCallCard. Emitting before the
+        # script caused the card to render while the audio was still
+        # in flight — users saw the routing copy but never heard it.
         script = core_safety.escalation_script_for(result.tier)
         await _speak_escalation_script(session, script, log, tier=result.tier.value)
+        # Brief audio-drain delay so the realtime model's TTS buffer
+        # flushes before we transition the UI / tear the room down.
         try:
-            closer = getattr(session, "aclose", None) or getattr(session, "close", None)
-            if callable(closer):
-                maybe = closer()
-                if hasattr(maybe, "__await__"):
-                    await maybe
-        except Exception as exc:  # noqa: BLE001 — best-effort close
-            log.warning("agent.safety.close_failed", error=str(exc))
+            import asyncio
+
+            await asyncio.sleep(_ESCALATION_AUDIO_DRAIN_SECONDS)
+        except Exception:  # noqa: BLE001 — sleep should never fail
+            pass
+        await _emit_session_end_signal(
+            ctx=ctx,
+            log=log,
+            tier=result.tier.value,
+            reason="escalation",
+        )
+        # Server-side LiveKit room delete is the authoritative teardown.
+        # By the time we get here the script has played and the signal
+        # has been delivered; deleting the room drops the WebRTC
+        # connection on the client and finishes the flow.
+        if ctx is not None:
+            room = getattr(ctx, "room", None)
+            room_name = getattr(room, "name", None) if room is not None else None
+            if room_name:
+                await _delete_room_after_drain(room_name, log=log)
 
     def _on_item(event: ConversationItemAddedEvent) -> None:
         item = event.item
@@ -1019,7 +1170,14 @@ async def entrypoint(ctx: JobContext) -> None:
         except Exception as exc:  # noqa: BLE001 — degrade rather than crash
             log.warning("agent.recall.fetch_failed", error=str(exc))
             prior_sessions = []
-    instructions = build_triage_system_prompt(prior_sessions)
+    # The disclaimer-branching signal is broader than the recall list
+    # above: any prior conversation row counts as "has heard the
+    # disclaimer". A transient failure here also degrades to False so
+    # the full disclaimer plays — safe default.
+    is_returning_user = core_conversations.has_prior_session(user, supabase_token=supabase_token)
+    if is_returning_user:
+        log.info("agent.disclaimer.short_branch")
+    instructions = build_triage_system_prompt(prior_sessions, is_returning_user=is_returning_user)
     agent = build_agent(deps, instructions=instructions)
 
     _wire_tool_call_forwarding(
@@ -1030,7 +1188,7 @@ async def entrypoint(ctx: JobContext) -> None:
         deps=deps,
     )
     _wire_metrics_logging(session)
-    _wire_safety_screen(session, deps, log, conv_id=conv_id)
+    _wire_safety_screen(session, deps, log, conv_id=conv_id, ctx=ctx)
     if conv_id is not None:
         _wire_conversation_persistence(
             session,
@@ -1100,8 +1258,10 @@ _ = all_tools, dispatch
 
 
 __all__ = [
+    "SESSION_END_TOPIC",
     "SYSTEM_PROMPT",
     "TOOL_CALLS_TOPIC",
+    "TRIAGE_STATE_TOPIC",
     "TRIAGE_TOOL_NAMES",
     "build_agent",
     "build_session",

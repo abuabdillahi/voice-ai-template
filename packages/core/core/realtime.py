@@ -38,6 +38,34 @@ _DEFAULT_OPENAI_REALTIME_MODEL = "gpt-realtime"
 # limits because the TTS plugin would error at speak time.
 _DEFAULT_VOICE = "sage"
 
+# Server-VAD threshold tuning. We use server_vad rather than
+# semantic_vad because the LiveKit and OpenAI Realtime docs both make
+# clear that ``eagerness`` on ``semantic_vad`` controls *how quickly
+# the model responds once the user has stopped* (a "lets users take
+# their time speaking" knob), not the amplitude noise-gate that
+# decides whether incoming audio counts as speech in the first place.
+# Coughs, sighs, throat-clears, and keyboard clicks still cross the
+# speech-detection line under semantic VAD at any eagerness setting,
+# which is exactly the symptom issue 04 was trying to fix.
+#
+# server_vad exposes a direct amplitude gate via ``threshold`` (0–1,
+# higher = less sensitive). Pairing a bumped threshold with a longer
+# ``silence_duration_ms`` lets transient sounds pass without yielding
+# the turn while still allowing a softly-spoken interruption.
+#
+# Pre-implementation check (issue 04): the installed
+# ``livekit-agents`` OpenAI plugin surfaces ``turn_detection`` as a
+# constructor kwarg on ``RealtimeModel`` (see
+# ``.venv/.../livekit/plugins/openai/realtime/realtime_model.py``,
+# overload signatures around line 278). The dict shape we pass is
+# coerced into the OpenAI ``ServerVad`` Pydantic model on the wire.
+#
+# Each value is its own module-level constant so a future tuning
+# pass is a one-line change without re-reading the surrounding code.
+_SERVER_VAD_THRESHOLD = 0.7
+_SERVER_VAD_SILENCE_DURATION_MS = 800
+_SERVER_VAD_PREFIX_PADDING_MS = 300
+
 
 def create_realtime_model(
     settings: Settings | None = None,
@@ -62,6 +90,12 @@ def create_realtime_model(
         "model": _DEFAULT_OPENAI_REALTIME_MODEL,
         "api_key": settings.openai_api_key,
         "voice": voice if voice is not None else _DEFAULT_VOICE,
+        "turn_detection": {
+            "type": "server_vad",
+            "threshold": _SERVER_VAD_THRESHOLD,
+            "silence_duration_ms": _SERVER_VAD_SILENCE_DURATION_MS,
+            "prefix_padding_ms": _SERVER_VAD_PREFIX_PADDING_MS,
+        },
     }
     return openai_plugin.realtime.RealtimeModel(**kwargs)
 

@@ -32,8 +32,8 @@ import {
   DisclaimerBanner,
   IN_SCOPE_CONDITIONS,
   ScopeStatement,
-  TriageHome,
-} from '@/components/triage-home';
+  SarjyHome,
+} from '@/components/sarjy-home';
 
 function renderWithProviders(ui: React.ReactElement) {
   const client = new QueryClient({
@@ -42,17 +42,23 @@ function renderWithProviders(ui: React.ReactElement) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
-describe('TriageHome', () => {
+describe('SarjyHome', () => {
+  it('renders the Sarjy product header', () => {
+    renderWithProviders(<SarjyHome />);
+    expect(screen.getByRole('heading', { level: 1, name: /^sarjy$/i })).toBeInTheDocument();
+  });
+
   it('renders the educational-tool disclaimer banner', () => {
-    renderWithProviders(<TriageHome />);
+    renderWithProviders(<SarjyHome />);
     const disclaimer = screen.getByRole('region', { name: /educational tool disclaimer/i });
     expect(disclaimer).toBeInTheDocument();
     expect(disclaimer).toHaveTextContent(/educational tool, not a doctor/i);
     expect(disclaimer).toHaveTextContent(/not a substitute/i);
+    expect(disclaimer).toHaveTextContent(/Sarjy helps you think about office-strain symptoms/);
   });
 
   it('lists the five in-scope conditions in the scope statement', () => {
-    renderWithProviders(<TriageHome />);
+    renderWithProviders(<SarjyHome />);
     const scope = screen.getByRole('region', { name: /what this tool can help with/i });
     expect(scope).toHaveTextContent(/carpal tunnel/i);
     expect(scope).toHaveTextContent(/computer vision syndrome/i);
@@ -62,12 +68,12 @@ describe('TriageHome', () => {
   });
 
   it('renders the talk-button affordance', () => {
-    renderWithProviders(<TriageHome />);
+    renderWithProviders(<SarjyHome />);
     expect(screen.getByRole('button', { name: /connect/i })).toBeInTheDocument();
   });
 
   it('does not render the memory sidebar', () => {
-    renderWithProviders(<TriageHome />);
+    renderWithProviders(<SarjyHome />);
     // The template's memory sidebar advertises a "what I remember about
     // you" panel; ensuring that copy is absent is a regression check
     // that the sidebar is not silently re-introduced.

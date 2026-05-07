@@ -7,10 +7,12 @@ import { apiFetch } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { useLivekitTranscript, type TranscriptEntry } from '@/lib/livekit-transcript';
 import { useLivekitTriageState } from '@/lib/livekit-triage-state';
+import { useSessionEndSignal } from '@/lib/livekit-session-end';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { EndOfCallCard } from '@/components/end-of-call-card';
 import { TriageSlots } from '@/components/triage-slots';
 import { cn } from '@/lib/utils';
 
@@ -42,6 +44,19 @@ export function TalkPage() {
   const [error, setError] = useState<string | null>(null);
   const transcript = useLivekitTranscript(room);
   const triageSlots = useLivekitTriageState(room);
+  const sessionEndSignal = useSessionEndSignal(room);
+
+  // The agent emits the session-end signal *before* speaking the
+  // escalation script — that is by design, so the EndOfCallCard can
+  // render while the audio is still arriving. We deliberately do not
+  // call `room.disconnect()` ourselves here: the authoritative
+  // teardown is the server-side `room.delete` (issued after the
+  // script finishes plus a ~500 ms drain in
+  // `_ESCALATION_AUDIO_DRAIN_SECONDS`), which naturally drops the
+  // WebRTC connection on the client. A previous version set a 500 ms
+  // timer and disconnected here; that race cut the audio track before
+  // any script audio had time to play, so the user saw the card but
+  // never heard the routing message.
 
   // Hold a ref to the active room so cleanup on unmount can
   // disconnect even if state has not yet flushed.
@@ -139,6 +154,21 @@ export function TalkPage() {
   };
 
   const isConnecting = status === 'connecting' || connectMutation.isPending;
+
+  // Once a session-end signal has been received, the talk page is no
+  // longer a talk page — it's an end-of-call screen. Render only the
+  // routing card, with no Connect / Disconnect / Mic affordances.
+  // Per issue 05's AC: "no Reconnect / Try-again affordance anywhere
+  // ... when the end-card is showing." The page chrome (Sign out /
+  // History links) lives in the parent route, so the user can still
+  // navigate away.
+  if (sessionEndSignal) {
+    return (
+      <div className="flex w-full max-w-3xl flex-col gap-4">
+        <EndOfCallCard signal={sessionEndSignal} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex w-full max-w-3xl flex-col gap-4">

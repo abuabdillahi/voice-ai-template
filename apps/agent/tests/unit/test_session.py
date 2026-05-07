@@ -258,3 +258,99 @@ def test_build_triage_system_prompt_handles_null_recall() -> None:
     prompt = build_triage_system_prompt([_prior("upper_trapezius_strain", recall=None)])
     assert "upper_trapezius_strain" in prompt
     assert "(no recall context recorded)" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Sarjy rebrand — agent self-introduction in opening turn
+# ---------------------------------------------------------------------------
+
+
+def test_static_prompt_contains_english_only_rule_in_every_branch() -> None:
+    """The English-only rule must appear verbatim in every prompt render.
+
+    The rule lives in the static section so it applies first-time,
+    returning, with-priors, and without-priors. Drift in the wording
+    re-opens the silent-translation failure mode the rule guards
+    against.
+    """
+    from agent.session import _ENGLISH_ONLY_RULE
+
+    empty = build_triage_system_prompt([])
+    populated = build_triage_system_prompt([_prior("carpal_tunnel", recall="recall blob")])
+
+    for prompt in (empty, populated):
+        assert _ENGLISH_ONLY_RULE in prompt
+        # And the user-facing refusal phrasing is byte-for-byte:
+        assert "I can only respond in English — could you repeat that in English?" in prompt
+
+
+def test_returning_user_no_priors_uses_short_refresher() -> None:
+    """``(True, [])`` swaps the full disclaimer for the short refresher.
+
+    The short opener is byte-for-byte: ``Hi, Sarjy here. Quick reminder
+    I'm still an educational tool, not a doctor.`` and the static
+    "Open every new conversation with this disclaimer" instruction is
+    no longer present in this branch.
+    """
+    short_opener = "Hi, Sarjy here. Quick reminder I'm still an educational tool, not a doctor."
+    full_disclaimer_instruction = (
+        "Open every new conversation with this disclaimer in your own words"
+    )
+
+    prompt = build_triage_system_prompt([], is_returning_user=True)
+    assert short_opener in prompt
+    assert full_disclaimer_instruction not in prompt
+
+    # First-time branch keeps the full disclaimer instruction and does
+    # NOT contain the short refresher phrasing.
+    first_time_prompt = build_triage_system_prompt([], is_returning_user=False)
+    assert full_disclaimer_instruction in first_time_prompt
+    assert short_opener not in first_time_prompt
+
+
+def test_returning_user_with_priors_composes_refresher_and_recall_block() -> None:
+    """``(True, [PriorSession])`` composes the short refresher with the recall block.
+
+    Short refresher leads; the existing "Most recent session" block
+    follows so the agent has both the relational anchor and the prior-
+    condition context.
+    """
+    prior = _prior("carpal_tunnel", recall="User reported wrist tingling.")
+    prompt = build_triage_system_prompt([prior], is_returning_user=True)
+
+    short_opener = "Hi, Sarjy here. Quick reminder I'm still an educational tool, not a doctor."
+    assert short_opener in prompt
+    assert "Most recent session" in prompt
+    assert "carpal_tunnel" in prompt
+    assert "User reported wrist tingling." in prompt
+    assert "Open every new conversation with this disclaimer" not in prompt
+
+
+def test_returning_user_branches_keep_english_only_and_numbers_rules() -> None:
+    """Existing safety rules survive the new branching unchanged."""
+    from agent.session import _ENGLISH_ONLY_RULE, _TRIAGE_NUMBERS_RULE
+
+    for prompt in (
+        build_triage_system_prompt([], is_returning_user=True),
+        build_triage_system_prompt(
+            [_prior("carpal_tunnel", recall="recall blob")], is_returning_user=True
+        ),
+    ):
+        assert _ENGLISH_ONLY_RULE in prompt
+        assert _TRIAGE_NUMBERS_RULE in prompt
+
+
+def test_static_prompt_instructs_sarjy_self_introduction() -> None:
+    """First-time users hear ``Hi, I'm Sarjy.`` immediately before the disclaimer.
+
+    The phrasing is fixed in the prompt rather than left to the model
+    so the test suite can assert it verbatim. The rule lives in the
+    static section of ``build_triage_system_prompt`` so it applies in
+    every render — first-time, returning, with-priors, without-priors.
+    """
+    empty_prompt = build_triage_system_prompt([])
+    assert "Hi, I'm Sarjy." in empty_prompt
+    assert "before the educational-tool disclaimer" in empty_prompt
+
+    populated = build_triage_system_prompt([_prior("carpal_tunnel", recall="recall blob")])
+    assert "Hi, I'm Sarjy." in populated

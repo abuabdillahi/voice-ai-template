@@ -63,3 +63,19 @@ def test_agent_instructions_carry_fixture_condition_id() -> None:
     # prompt — guards against drift in the alias.
     fallback = build_triage_system_prompt([])
     assert fallback == SYSTEM_PROMPT
+
+
+def test_returning_user_short_refresher_threads_to_agent_instructions() -> None:
+    """``is_returning_user=True`` end-to-end through to ``Agent.instructions``.
+
+    The integration-shaped assertion: a stubbed returning-user path
+    (no prior condition-bearing sessions, but the user is recognised)
+    yields an Agent whose instructions carry the short-refresher
+    phrasing verbatim.
+    """
+    instructions = build_triage_system_prompt([], is_returning_user=True)
+    agent = build_agent(instructions=instructions)
+    assert (
+        "Hi, Sarjy here. Quick reminder I'm still an educational tool, not a doctor."
+        in agent.instructions
+    )
