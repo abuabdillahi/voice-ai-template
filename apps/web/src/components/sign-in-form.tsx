@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 
 import { supabase } from '@/lib/supabase';
+import { SarjyLogo } from '@/components/sarjy-logo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -78,6 +79,10 @@ export function SignInForm({ onSignedIn }: SignInFormProps) {
   return (
     <Card className="w-full max-w-md">
       <CardHeader>
+        <div className="mb-2 flex items-center gap-2">
+          <SarjyLogo size={32} />
+          <span className="text-base font-semibold">Sarjy</span>
+        </div>
         <CardTitle>{mode === 'sign-in' ? 'Sign in' : 'Create account'}</CardTitle>
         <CardDescription>
           {mode === 'sign-in'

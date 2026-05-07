@@ -1,6 +1,7 @@
 import { Link, useNavigate } from '@tanstack/react-router';
 
 import { supabase } from '@/lib/supabase';
+import { SarjyLogo } from '@/components/sarjy-logo';
 import { TalkPage } from '@/components/talk-page';
 import { Button } from '@/components/ui/button';
 
@@ -38,7 +39,10 @@ export function SarjyHome() {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="flex items-center justify-between border-b border-[hsl(var(--border))] px-6 py-3">
-        <h1 className="text-lg font-semibold">Sarjy</h1>
+        <div className="flex items-center gap-2">
+          <SarjyLogo size={28} />
+          <h1 className="text-lg font-semibold">Sarjy</h1>
+        </div>
         <nav className="flex items-center gap-2">
           <Button asChild variant="link" size="sm">
             <Link to="/history">History</Link>
