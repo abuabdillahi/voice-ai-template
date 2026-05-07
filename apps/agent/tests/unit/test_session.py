@@ -1,11 +1,7 @@
 """Unit tests for `agent.session`.
 
-After the issue-01 triage pivot, this suite pins the contract for the
-educational triage system prompt and the scaffolding around it.
-``build_system_prompt`` (the personalisation helper) and the example
-session/worker wiring tests continue to apply unchanged — the helper is
-retained as kept-public-API surface (ADR 0006) but is bypassed by the
-triage entrypoint.
+Pins the contract for the educational triage system prompt and the
+session/worker wiring around it.
 """
 
 from __future__ import annotations
@@ -17,7 +13,6 @@ from agent.session import (
     SYSTEM_PROMPT,
     build_agent,
     build_session,
-    build_system_prompt,
     build_triage_system_prompt,
     worker_options,
 )
@@ -76,48 +71,6 @@ def test_worker_options_pulls_credentials_from_settings(settings: Settings) -> N
     from agent.session import entrypoint
 
     assert opts.entrypoint_fnc is entrypoint
-
-
-# ---------------------------------------------------------------------------
-# Issue 10 — preference-driven personalisation
-# ---------------------------------------------------------------------------
-
-
-def test_build_system_prompt_returns_default_without_name() -> None:
-    assert build_system_prompt(None) == SYSTEM_PROMPT
-    assert build_system_prompt("") == SYSTEM_PROMPT
-
-
-def test_build_system_prompt_appends_preferred_name() -> None:
-    prompt = build_system_prompt("Sam")
-    assert prompt.startswith(SYSTEM_PROMPT)
-    assert "prefers to be called Sam" in prompt
-
-
-def test_build_system_prompt_inlines_stored_preferences() -> None:
-    """Stored preferences other than name/voice are listed as facts.
-
-    Without this preload the model has to call get_preference to
-    recall anything, which it does inconsistently — cross-session
-    recall feels broken.
-    """
-    prompt = build_system_prompt(
-        None,
-        {"favorite_color": "blue", "preferred_name": "Sam", "voice": "sage"},
-    )
-    assert "favorite color: blue" in prompt
-    # preferred_name and voice are excluded from the facts block —
-    # name is handled above; voice is session config, not a fact.
-    assert "preferred name: Sam" not in prompt
-    assert "voice: sage" not in prompt
-
-
-def test_build_system_prompt_omits_facts_block_when_no_extra_preferences() -> None:
-    prompt = build_system_prompt("Sam", {"preferred_name": "Sam", "voice": "sage"})
-    # The SYSTEM_PROMPT mentions "Known facts" in its meta-instructions;
-    # we are checking the absence of the appended facts list. The list
-    # uses the literal "Known facts about the user (from prior" header.
-    assert "Known facts about the user (from prior" not in prompt
 
 
 def test_build_agent_uses_custom_instructions() -> None:

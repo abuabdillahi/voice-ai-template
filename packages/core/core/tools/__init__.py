@@ -15,13 +15,9 @@ schema-derivation, error-mapping, or logging-binding details.
 
 from __future__ import annotations
 
-# Importing the examples module triggers @tool registration as a side
-# effect, so the canonical example tools are discoverable on first
-# import of `core.tools`. Downstream developers wire up their own
-# tools the same way: `import myapp.tools` once at process start.
-from core.tools import examples as examples  # noqa: F401
-from core.tools import memory as memory  # noqa: F401
-from core.tools import preferences as preferences  # noqa: F401
+# Importing the triage module triggers @tool registration as a side
+# effect, so the triage tools are discoverable on first import of
+# `core.tools`.
 from core.tools import triage as triage  # noqa: F401
 from core.tools.registry import (
     ToolContext,

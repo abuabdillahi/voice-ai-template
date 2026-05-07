@@ -6,16 +6,7 @@ The full specification lives at [`.scratch/voice-ai-template/PRD.md`](./.scratch
 
 ## Status
 
-Foundation + auth tracer + voice loop tracer + tool-calling tracer + structured preferences tracer + episodic memory tracer + conversation persistence tracer. Workspace skeleton, tooling, Docker, the Supabase auth slice, the LiveKit + OpenAI Realtime voice loop, the tool-registration / dispatch layer with two example tools, the structured-preferences memory layer, the mem0-backed episodic memory layer, and persisted conversation transcripts with the history pages are in place.
-
-## User memory
-
-The PRD calls for a hybrid memory model. The two halves are deliberately separate access patterns over the **same Postgres instance** — the split is in how memory is named and queried, not where bytes live:
-
-- **Structured user preferences** — deterministic facts the user states explicitly ("my favorite color is blue", "respond in German"). They live in the `user_preferences` table keyed by `(user_id, key)`, are exposed to the agent via `set_preference` / `get_preference` tools, and surface in the "What I remember about you" sidebar via `GET /preferences`. Lookup is a primary-key read; updates are deterministic upserts. Use this when the agent needs to retrieve a value by name.
-- **Episodic memory** — incidental facts mentioned in passing ("I'm learning Spanish", "my daughter is named Maya"). They live in the `mem0_memories` pgvector table managed by [mem0](https://github.com/mem0ai/mem0), exposed to the agent via `remember` / `recall` tools, and surface in the "Recent memories" sidebar section via `GET /memories/recent`. mem0 owns fact extraction, deduplication, conflict resolution on contradicting facts, and similarity search. Use this when the agent needs to find something _related to a query_ without knowing a specific key.
-
-Row-level security at the database isolates one user's data from another's on both tables — the application never has to remember to filter by user. The mem0 table's RLS predicate filters on `payload->>'user_id'` because mem0 stores ownership in the JSONB payload rather than a typed column; behaviourally the isolation is identical to the preferences table's `auth.uid() = user_id`. See [`.scratch/voice-ai-template/PRD.md`](./.scratch/voice-ai-template/PRD.md) for the full rationale.
+Foundation + auth tracer + voice loop tracer + tool-calling tracer + conversation persistence tracer + triage product layer. Workspace skeleton, tooling, Docker, the Supabase auth slice, the LiveKit + OpenAI Realtime voice loop, the tool-registration / dispatch layer, persisted conversation transcripts with the history pages, and the office-strain triage tools (`record_symptom`, `get_differential`, `recommend_treatment`, `escalate`, `find_clinician`) are in place.
 
 ## Conversation history
 
@@ -166,14 +157,14 @@ Subsequent slices may swap providers; the swap point is a single function in `co
 
 ### Per-user database writes from the agent
 
-The agent worker writes to RLS-protected tables (`user_preferences`, `conversations`, `messages`, mem0 memories) on behalf of the signed-in user. To honour those policies, it needs the user's Supabase JWT — Supabase RLS keys off `auth.uid()`, which is derived from the bearer token, not from a service role.
+The agent worker writes to RLS-protected tables (`conversations`, `messages`, `safety_events`) on behalf of the signed-in user. To honour those policies, it needs the user's Supabase JWT — Supabase RLS keys off `auth.uid()`, which is derived from the bearer token, not from a service role.
 
 The token reaches the agent via the **LiveKit participant metadata**:
 
 1. Frontend POSTs `/livekit/token` with its Supabase access token in the `Authorization: Bearer …` header.
 2. The API route mints a LiveKit access token whose `metadata` claim holds `{"supabase_access_token": "<jwt>"}`.
 3. Frontend uses that token to join the room.
-4. Agent worker calls `_resolve_supabase_token(ctx)` at session start, parses the metadata, and forwards the JWT to every `core.preferences` / `core.memory` / `core.conversations` call it makes on the user's behalf.
+4. Agent worker calls `_resolve_supabase_token(ctx)` at session start, parses the metadata, and forwards the JWT to every `core.conversations` / `core.safety_events` call it makes on the user's behalf.
 
 **Security note.** LiveKit metadata is decodable by anyone holding the LiveKit access token. In this template that is acceptable — the same client (the signed-in user's browser) already holds the Supabase JWT in its session storage, so embedding it in the LiveKit token does not widen its exposure. **Downstream apps with stricter requirements** (shared rooms, spectator participants, third-party agents) should pass the token through a server-side relay instead — e.g. a separate `POST /agent/dispatch` call that issues the LiveKit token without metadata and forwards the Supabase JWT directly to the agent worker through a private channel.
 
@@ -257,7 +248,7 @@ voice-ai/
 │   ├── api/              # FastAPI HTTP backend
 │   └── agent/            # LiveKit Agents worker (voice loop)
 ├── packages/
-│   └── core/             # Shared Python: domain logic, schema, memory layer
+│   └── core/             # Shared Python: domain logic, triage, safety, conversations
 ├── docs/agents/          # Configuration for agent skills
 ├── .scratch/             # PRDs and implementation issues (local issue tracker)
 ├── pyproject.toml        # uv workspace root

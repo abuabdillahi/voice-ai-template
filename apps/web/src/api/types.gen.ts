@@ -57,9 +57,19 @@ export interface paths {
          * Livekit Token
          * @description Mint a LiveKit access token for the authenticated user.
          *
-         *     The route is a thin adapter over :func:`core.livekit.issue_token`;
-         *     the token's `identity` is the Supabase user id and the room
-         *     defaults to ``user-{userId}`` when the client does not specify one.
+         *     The route is a thin adapter over :func:`core.livekit.issue_token`.
+         *     The token's ``identity`` is the Supabase user id and the room
+         *     defaults to ``user-{userId}-{nonce}`` when the client does not
+         *     specify one. The trailing nonce is critical: LiveKit dispatches
+         *     agents on room *creation*, not on every participant join, so
+         *     reusing a stable room name across disconnect → reconnect cycles
+         *     leaves the second session running without an agent. A fresh room
+         *     name per token request guarantees a fresh dispatch.
+         *
+         *     The user's Supabase access token is embedded in the LiveKit
+         *     token's ``metadata`` claim so the agent worker can forward it to
+         *     RLS-scoped database calls (see :mod:`core.livekit` for the
+         *     security trade-offs of that approach).
          */
         post: operations["livekit_token_livekit_token_post"];
         delete?: never;
@@ -68,7 +78,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/preferences": {
+    "/sessions/prior-status": {
         parameters: {
             query?: never;
             header?: never;
@@ -76,70 +86,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Preferences
-         * @description Return every stored preference for the authenticated user.
-         *
-         *     Thin adapter over :func:`core.preferences.list`. The user's bearer
-         *     token is forwarded to the Supabase client so RLS policies (defined
-         *     in ``0001_user_preferences.sql``) apply to the database query.
+         * Prior Session Status
+         * @description Return whether the authenticated user has any prior conversation rows.
          */
-        get: operations["list_preferences_preferences_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/preferences/{key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Upsert Preference
-         * @description Upsert a single preference for the authenticated user.
-         *
-         *     Validated against :func:`core.preferences.validate_preference`,
-         *     which today only accepts the settings-page keys
-         *     (:data:`core.preferences.SETTINGS_KEYS`). The free-form
-         *     ``set_preference`` agent tool remains available for keys outside
-         *     that catalogue — the settings page is intentionally narrower than
-         *     the agent's surface.
-         *
-         *     Returns 400 with a structured error body on validation failure,
-         *     401 without authentication, 200 on success.
-         */
-        put: operations["upsert_preference_preferences__key__put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/memories/recent": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Recent Memories
-         * @description Return the authenticated user's recent episodic memories.
-         *
-         *     Thin adapter over :func:`core.memory.list_recent`. The user's
-         *     bearer token is forwarded for symmetry with the preferences route;
-         *     mem0 itself does not consume the Supabase JWT today (it talks to
-         *     Postgres directly), but RLS policies on ``mem0_memories`` enforce
-         *     user isolation at the database level — see ``0003_mem0_memories.sql``.
-         */
-        get: operations["list_recent_memories_memories_recent_get"];
+        get: operations["prior_session_status_sessions_prior_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -334,38 +284,6 @@ export interface components {
             email: string;
         };
         /**
-         * MemoriesResponse
-         * @description Response payload for ``GET /memories/recent``.
-         */
-        MemoriesResponse: {
-            /**
-             * Memories
-             * @description The authenticated user's most recent memories, newest-first by mem0's ordering.
-             */
-            memories?: components["schemas"]["MemoryItem"][];
-        };
-        /**
-         * MemoryItem
-         * @description One recalled memory, projected for the wire.
-         *
-         *     Mirrors :class:`core.memory.Memory`. We expose ``id`` so a future
-         *     UI can attribute updates back to the same memory; ``score`` is
-         *     intentionally omitted from the listing endpoint because the
-         *     sidebar lists rather than ranks.
-         */
-        MemoryItem: {
-            /**
-             * Id
-             * @description Stable identifier mem0 assigns to the memory.
-             */
-            id: string;
-            /**
-             * Content
-             * @description The remembered fact, in natural language.
-             */
-            content: string;
-        };
-        /**
          * MessageItem
          * @description A single transcript turn for the detail view.
          */
@@ -394,52 +312,22 @@ export interface components {
             created_at: string;
         };
         /**
-         * PreferenceUpsertRequest
-         * @description Body for ``PUT /preferences/{key}``.
+         * PriorSessionStatusResponse
+         * @description Whether the user has spoken to Sarjy before.
          *
-         *     A single ``value`` field rather than free-form JSON so the OpenAPI
-         *     schema (and thus the generated TS types) carries an explicit shape
-         *     the frontend can typecheck. The field is ``Any``-typed to allow
-         *     the existing structured-preferences contract (string today,
-         *     structured values later); validation against the recognised key
-         *     catalogue happens server-side via
-         *     :func:`core.preferences.validate_preference`.
+         *     The frontend pre-connect surface pairs this signal with the safety
+         *     card: first-time visitors see the full amber disclaimer permanently,
+         *     returning users see the collapsed pill. The same predicate
+         *     (:func:`core.conversations.has_prior_session`) is what the agent
+         *     consults to choose between the long opener and the short refresher,
+         *     so the visual treatment stays in lockstep with what the agent says.
          */
-        PreferenceUpsertRequest: {
+        PriorSessionStatusResponse: {
             /**
-             * Value
-             * @description New value for the preference.
+             * Is Returning User
+             * @description True when the user has at least two prior conversation rows.
              */
-            value: unknown;
-        };
-        /**
-         * PreferenceUpsertResponse
-         * @description Echo of the stored value after a ``PUT`` succeeds.
-         */
-        PreferenceUpsertResponse: {
-            /** Key */
-            key: string;
-            /** Value */
-            value: unknown;
-        };
-        /**
-         * PreferencesResponse
-         * @description Flat key-value map of the authenticated user's preferences.
-         *
-         *     The shape is intentionally a single ``preferences`` field rather
-         *     than the response body itself being a free-form object — FastAPI
-         *     + OpenAPI handle nested objects more reliably than top-level
-         *     ``additionalProperties`` schemas, and the frontend reads
-         *     ``response.preferences`` either way.
-         */
-        PreferencesResponse: {
-            /**
-             * Preferences
-             * @description All stored preferences for the authenticated user.
-             */
-            preferences?: {
-                [key: string]: unknown;
-            };
+            is_returning_user: boolean;
         };
         /** ValidationError */
         ValidationError: {
@@ -549,7 +437,7 @@ export interface operations {
             };
         };
     };
-    list_preferences_preferences_get: {
+    prior_session_status_sessions_prior_status_get: {
         parameters: {
             query?: never;
             header?: {
@@ -566,78 +454,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PreferencesResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    upsert_preference_preferences__key__put: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                /** @description Preference key, e.g. 'preferred_name' or 'voice'. */
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PreferenceUpsertRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreferenceUpsertResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_recent_memories_memories_recent_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemoriesResponse"];
+                    "application/json": components["schemas"]["PriorSessionStatusResponse"];
                 };
             };
             /** @description Validation Error */

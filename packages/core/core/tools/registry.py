@@ -56,7 +56,7 @@ class ToolContext:
     empty string for tests that build a context without a session.
 
     ``supabase_access_token`` is the user's Supabase JWT, propagated
-    through to RLS-scoped database calls (see :mod:`core.preferences`).
+    through to RLS-scoped database calls (see :mod:`core.conversations`).
     Optional because not every tool touches the database — and because
     the session-bootstrap path that supplies it is wired up
     incrementally; tools that need it must check and degrade gracefully

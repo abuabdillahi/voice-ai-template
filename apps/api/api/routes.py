@@ -12,8 +12,7 @@ from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from core import conversations, preferences
-from core import memory as core_memory
+from core import conversations
 from core.auth import User, get_current_user
 from core.config import Settings, get_settings
 from core.livekit import issue_token
@@ -172,151 +171,8 @@ def prior_session_status(
     return PriorSessionStatusResponse(is_returning_user=is_returning)
 
 
-class PreferencesResponse(BaseModel):
-    """Flat key-value map of the authenticated user's preferences.
-
-    The shape is intentionally a single ``preferences`` field rather
-    than the response body itself being a free-form object — FastAPI
-    + OpenAPI handle nested objects more reliably than top-level
-    ``additionalProperties`` schemas, and the frontend reads
-    ``response.preferences`` either way.
-    """
-
-    preferences: dict[str, Any] = Field(
-        default_factory=dict,
-        description="All stored preferences for the authenticated user.",
-    )
-
-
-@router.get("/preferences", response_model=PreferencesResponse, tags=["preferences"])
-def list_preferences(
-    current_user: Annotated[User, Depends(get_current_user)],
-    authorization: Annotated[str | None, Header()] = None,
-) -> PreferencesResponse:
-    """Return every stored preference for the authenticated user.
-
-    Thin adapter over :func:`core.preferences.list`. The user's bearer
-    token is forwarded to the Supabase client so RLS policies (defined
-    in ``0001_user_preferences.sql``) apply to the database query.
-    """
-    access_token = _bearer_token(authorization)
-    rows = preferences.list(current_user, access_token=access_token)
-    return PreferencesResponse(preferences=rows)
-
-
-class PreferenceUpsertRequest(BaseModel):
-    """Body for ``PUT /preferences/{key}``.
-
-    A single ``value`` field rather than free-form JSON so the OpenAPI
-    schema (and thus the generated TS types) carries an explicit shape
-    the frontend can typecheck. The field is ``Any``-typed to allow
-    the existing structured-preferences contract (string today,
-    structured values later); validation against the recognised key
-    catalogue happens server-side via
-    :func:`core.preferences.validate_preference`.
-    """
-
-    value: Any = Field(description="New value for the preference.")
-
-
-class PreferenceUpsertResponse(BaseModel):
-    """Echo of the stored value after a ``PUT`` succeeds."""
-
-    key: str
-    value: Any
-
-
-@router.put(
-    "/preferences/{key}",
-    response_model=PreferenceUpsertResponse,
-    tags=["preferences"],
-)
-def upsert_preference(
-    current_user: Annotated[User, Depends(get_current_user)],
-    key: Annotated[str, Path(description="Preference key, e.g. 'preferred_name' or 'voice'.")],
-    payload: PreferenceUpsertRequest,
-    authorization: Annotated[str | None, Header()] = None,
-) -> PreferenceUpsertResponse:
-    """Upsert a single preference for the authenticated user.
-
-    Validated against :func:`core.preferences.validate_preference`,
-    which today only accepts the settings-page keys
-    (:data:`core.preferences.SETTINGS_KEYS`). The free-form
-    ``set_preference`` agent tool remains available for keys outside
-    that catalogue — the settings page is intentionally narrower than
-    the agent's surface.
-
-    Returns 400 with a structured error body on validation failure,
-    401 without authentication, 200 on success.
-    """
-    access_token = _bearer_token(authorization)
-    try:
-        normalised = preferences.validate_preference(key, payload.value)
-    except preferences.PreferenceValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": "invalid_preference", "message": str(exc)},
-        ) from exc
-    preferences.set(current_user, key, normalised, access_token=access_token)
-    return PreferenceUpsertResponse(key=key, value=normalised)
-
-
 # ---------------------------------------------------------------------------
-# Issue 08 — episodic memory routes.
-# ---------------------------------------------------------------------------
-
-
-class MemoryItem(BaseModel):
-    """One recalled memory, projected for the wire.
-
-    Mirrors :class:`core.memory.Memory`. We expose ``id`` so a future
-    UI can attribute updates back to the same memory; ``score`` is
-    intentionally omitted from the listing endpoint because the
-    sidebar lists rather than ranks.
-    """
-
-    id: str = Field(description="Stable identifier mem0 assigns to the memory.")
-    content: str = Field(description="The remembered fact, in natural language.")
-
-
-class MemoriesResponse(BaseModel):
-    """Response payload for ``GET /memories/recent``."""
-
-    memories: list[MemoryItem] = Field(
-        default_factory=list,
-        description=(
-            "The authenticated user's most recent memories, newest-first by mem0's ordering."
-        ),
-    )
-
-
-@router.get("/memories/recent", response_model=MemoriesResponse, tags=["memories"])
-def list_recent_memories(
-    current_user: Annotated[User, Depends(get_current_user)],
-    authorization: Annotated[str | None, Header()] = None,
-    limit: Annotated[int, Query(ge=1, le=50)] = 10,
-) -> MemoriesResponse:
-    """Return the authenticated user's recent episodic memories.
-
-    Thin adapter over :func:`core.memory.list_recent`. The user's
-    bearer token is forwarded for symmetry with the preferences route;
-    mem0 itself does not consume the Supabase JWT today (it talks to
-    Postgres directly), but RLS policies on ``mem0_memories`` enforce
-    user isolation at the database level — see ``0003_mem0_memories.sql``.
-    """
-    access_token = _bearer_token(authorization)
-    rows = core_memory.list_recent(
-        current_user,
-        limit=limit,
-        supabase_token=access_token,
-    )
-    return MemoriesResponse(
-        memories=[MemoryItem(id=m.id, content=m.content) for m in rows],
-    )
-
-
-# ---------------------------------------------------------------------------
-# Issue 09 — conversation history routes.
+# Conversation history routes.
 # ---------------------------------------------------------------------------
 
 

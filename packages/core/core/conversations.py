@@ -6,10 +6,10 @@ worker writes these mid-session via :func:`start`, :func:`append_message`,
 and :func:`end`; the API exposes :func:`list_for_user` and :func:`get`
 for the web app's history pages.
 
-Like :mod:`core.preferences`, every call accepts the user's Supabase
-access token so PostgREST runs the query as the authenticated user and
-RLS policies (``0002_conversations.sql``) apply. Without the token the
-query hits the table as the ``anon`` role and silently returns no rows.
+Every call accepts the user's Supabase access token so PostgREST runs
+the query as the authenticated user and RLS policies
+(``0002_conversations.sql``) apply. Without the token the query hits
+the table as the ``anon`` role and silently returns no rows.
 
 ``end`` calls :func:`generate_summary_and_recall` automatically when
 the caller does not supply one and the conversation has at least three

@@ -72,14 +72,6 @@ describe('SarjyHome', () => {
     renderWithProviders(<SarjyHome />);
     expect(screen.getByRole('button', { name: /start talking/i })).toBeInTheDocument();
   });
-
-  it('does not render the memory sidebar', () => {
-    renderWithProviders(<SarjyHome />);
-    // The template's memory sidebar advertises a "what I remember about
-    // you" panel; ensuring that copy is absent is a regression check
-    // that the sidebar is not silently re-introduced.
-    expect(screen.queryByText(/i'll remember things you tell me here/i)).toBeNull();
-  });
 });
 
 describe('DisclaimerBanner', () => {

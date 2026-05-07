@@ -2,10 +2,9 @@
 
 Persists every tier-1 / tier-2 red-flag escalation as a ``safety_events``
 row so a clinician reviewer can audit escalations after the fact. The
-module surface mirrors :mod:`core.conversations` and
-:mod:`core.preferences`: typed insert under the user's JWT, typed read
-of the user's own events. RLS (``0004_safety_events.sql``) enforces
-isolation at the database level.
+module surface mirrors :mod:`core.conversations`: typed insert under
+the user's JWT, typed read of the user's own events. RLS
+(``0004_safety_events.sql``) enforces isolation at the database level.
 
 The module is best-effort from the agent worker's perspective — a
 failure to insert is logged but never blocks the escalation script or

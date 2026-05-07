@@ -70,10 +70,9 @@ def get_user_client(
 
     The returned client's PostgREST calls run as the authenticated user,
     so RLS policies (``auth.uid() = user_id``) apply automatically. Call
-    sites in `core.preferences` (and later `core.conversations`,
-    `core.memory`) build one of these per request rather than reusing
-    a long-lived global — the overhead is small and the alternative is
-    to plumb tokens through every layer.
+    sites in `core.conversations` build one of these per request rather
+    than reusing a long-lived global — the overhead is small and the
+    alternative is to plumb tokens through every layer.
     """
     settings = settings or get_settings()
     return _build_user_client(

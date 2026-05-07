@@ -18,33 +18,17 @@ Boundaries:
   the transcript view can render them as a third message type without
   parsing free-form text.
 
-Triage product disposition:
+Cross-session recall:
 
-The structured-preferences tools (``set_preference`` / ``get_preference``)
-and the episodic-memory tools (``remember`` / ``recall``), along with
-the example tools (``get_current_time`` / ``get_weather``), remain in
-source as kept public API per the precedent set by ADR 0006. The agent
-worker no longer registers them with the realtime model — triage is
-single-session and the cross-session "remember about you" surface is an
-avoidable hallucination risk for a medical-adjacent product. The
-``_load_user_preferences`` and ``build_system_prompt`` personalisation
-helpers below are likewise retained but bypassed for this product.
-
-A *third* memory surface — prompt-time injection of structured triage-
-outcome facts via :func:`build_triage_system_prompt` — has been added
-on top of the two decisions above. It does *not* reverse them: mem0
-stays unregistered, the personalisation ``build_system_prompt`` stays
-bypassed. What makes the third surface acceptable where the others
-were not is the safety floor it operates inside: only the
-deterministically-extracted ``identified_condition_id`` (auditable,
-not LLM-extracted) is named in the opener; the free-text
-``recall_context`` is supplied for grounding only and the prompt
-explicitly forbids quoting any treatment numbers from it; the fetch
-is bounded at the last three condition-bearing prior sessions; and
-no model decision about *when* to recall is required — the prompt
-either has the block or it doesn't. Future contributors should not
-read "triage does not personalise" as ruling this surface out — it
-was written about the other two and pre-dates this one.
+The agent injects structured triage-outcome facts into the system
+prompt via :func:`build_triage_system_prompt`. The safety floor that
+makes this acceptable: only the deterministically-extracted
+``identified_condition_id`` (auditable, not LLM-extracted) is named in
+the opener; the free-text ``recall_context`` is supplied for grounding
+only and the prompt explicitly forbids quoting any treatment numbers
+from it; the fetch is bounded at the last three condition-bearing
+prior sessions; and no model decision about *when* to recall is
+required — the prompt either has the block or it doesn't.
 """
 
 from __future__ import annotations
@@ -56,7 +40,6 @@ from uuid import UUID
 
 import structlog
 from core import conversations as core_conversations
-from core import preferences as core_preferences
 from core import safety as core_safety
 from core import safety_events as core_safety_events
 from core import triage as core_triage
@@ -137,11 +120,6 @@ _ESCALATION_AUDIO_DRAIN_SECONDS = 0.5
 _ESCALATION_MODEL_GRACE_SECONDS = 0.3
 
 # Allowlist of tool names the realtime model is permitted to call.
-# Slice 02 added `record_symptom`; slice 03 adds `get_differential`
-# and `recommend_treatment`; slice 04 adds `escalate`; the
-# clinician-finder feature adds `find_clinician`. Tools registered
-# with `core.tools` (preferences, memory, examples) are deliberately
-# excluded.
 TRIAGE_TOOL_NAMES: tuple[str, ...] = (
     "record_symptom",
     "get_differential",
@@ -576,76 +554,6 @@ def build_session(
     model = create_realtime_model(settings, voice=chosen_voice)
     tts = create_safety_tts(settings, voice=chosen_voice)
     return AgentSession[None](llm=model, tts=tts)
-
-
-def _load_user_preferences(
-    user: User,
-    supabase_token: str | None,
-    log: Any,
-) -> tuple[str | None, str | None, dict[str, Any]]:
-    """Read all stored preferences for the session start.
-
-    Retained as a public surface (kept-API per ADR 0006) but not called
-    by the triage entrypoint. Returns ``(preferred_name, voice,
-    all_prefs)``. Any of the first two may be ``None``; ``all_prefs`` is
-    the full row map so a personalised system prompt can list every
-    stored preference as a known fact.
-    """
-    if supabase_token is None:
-        return (None, None, {})
-    try:
-        rows = core_preferences.list(user, access_token=supabase_token)
-    except Exception as exc:  # noqa: BLE001 — degrade rather than crash
-        log.warning("agent.preferences.read_failed", error=str(exc))
-        return (None, None, {})
-    raw_name = rows.get(core_preferences.PREFERRED_NAME_KEY)
-    raw_voice = rows.get(core_preferences.VOICE_KEY)
-    name: str | None = None
-    voice: str | None = None
-    if isinstance(raw_name, str) and raw_name.strip():
-        name = raw_name.strip()
-    if isinstance(raw_voice, str) and raw_voice in core_preferences.OPENAI_REALTIME_VOICES:
-        voice = raw_voice
-    log.info(
-        "agent.preferences.loaded",
-        count=len(rows),
-        keys=sorted(rows.keys()),
-    )
-    return (name, voice, dict(rows))
-
-
-def build_system_prompt(
-    preferred_name: str | None,
-    preferences: dict[str, Any] | None = None,
-) -> str:
-    """Compose a personalised system prompt — kept-API, not used by triage.
-
-    Retained as part of the kept-public-API surface (ADR 0006). The
-    triage product uses :data:`SYSTEM_PROMPT` directly and never calls
-    this helper. Tests for the personalisation seam continue to work
-    against this function.
-    """
-    prompt = SYSTEM_PROMPT
-    if preferred_name:
-        prompt += f" The user prefers to be called {preferred_name}."
-
-    facts: list[str] = []
-    if preferences:
-        excluded = {core_preferences.PREFERRED_NAME_KEY, core_preferences.VOICE_KEY}
-        for key, value in sorted(preferences.items()):
-            if key in excluded:
-                continue
-            if value is None or (isinstance(value, str) and not value.strip()):
-                continue
-            facts.append(f"- {key.replace('_', ' ')}: {value}")
-    if facts:
-        prompt += (
-            "\n\nKnown facts about the user (from prior sessions). Use these "
-            "to answer personal questions directly without calling tools, but "
-            "still call set_preference to record any new preferences they "
-            "state:\n" + "\n".join(facts)
-        )
-    return prompt
 
 
 def _wire_tool_call_forwarding(
@@ -1606,7 +1514,6 @@ __all__ = [
     "TRIAGE_TOOL_NAMES",
     "build_agent",
     "build_session",
-    "build_system_prompt",
     "build_triage_system_prompt",
     "entrypoint",
     "worker_options",

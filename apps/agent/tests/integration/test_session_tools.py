@@ -1,11 +1,7 @@
 """Integration-style tests for `agent.session` tool wiring.
 
-After the issue-01 triage pivot, the agent registers only the tools in
-:data:`agent.session.TRIAGE_TOOL_NAMES` with the realtime model. The
-preference, memory, and example tools remain registered in the core
-registry as kept-public-API surface (see ADR 0006) and continue to
-have their own unit/integration tests; what changes here is the
-agent-level allowlist.
+The agent registers only the tools in
+:data:`agent.session.TRIAGE_TOOL_NAMES` with the realtime model.
 
 The tests below assert the *contract* a LiveKit Agents test harness
 would otherwise verify:
@@ -128,25 +124,6 @@ def test_system_prompt_documents_confidence_threshold_for_recommend_treatment() 
     # to know the actual number so its decision is deterministic.
     assert "0.15" in lower
     assert "professional evaluation" in lower or "clinician visit" in lower
-
-
-def test_agent_does_not_register_preference_or_memory_or_example_tools() -> None:
-    """The triage product unregisters the template's example tools.
-
-    The modules behind these tools remain in source as kept public API
-    (ADR 0006); the assertion is on the agent's *registered* tool set.
-    """
-    agent = build_agent(_deps(), settings=_settings(osm_contact_email="ops@example.com"))
-    registered_names = {t.info.name for t in agent.tools}  # type: ignore[union-attr]
-    forbidden = {
-        "set_preference",
-        "get_preference",
-        "remember",
-        "recall",
-        "get_current_time",
-        "get_weather",
-    }
-    assert registered_names.isdisjoint(forbidden)
 
 
 def test_system_prompt_frames_the_product_as_educational_not_diagnostic() -> None:
