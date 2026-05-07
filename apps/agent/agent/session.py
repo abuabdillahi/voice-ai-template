@@ -125,6 +125,17 @@ SESSION_END_TOPIC = "lk.session-end"
 # tests show clipping, raise this.
 _ESCALATION_AUDIO_DRAIN_SECONDS = 0.5
 
+# Grace window (seconds) between a tier-1/tier-2 hit on the safety
+# screen and claiming the EscalationGuard. Gives the realtime model
+# time to call the `escalate` tool itself; if the model wins the
+# claim during this window the safety screen bails and the model
+# speaks the escalation script with no interrupt and no overlap. If
+# the model never calls escalate, the screen claims the guard once
+# the grace expires and runs the canned teardown — so the safety
+# floor is delayed by at most this long when the model stays silent.
+# Tests monkeypatch this to 0.0 to skip the wait.
+_ESCALATION_MODEL_GRACE_SECONDS = 0.3
+
 # Allowlist of tool names the realtime model is permitted to call.
 # Slice 02 added `record_symptom`; slice 03 adds `get_differential`
 # and `recommend_treatment`; slice 04 adds `escalate`. Tools
@@ -1071,6 +1082,17 @@ def _wire_safety_screen(
         if result.tier not in (core_safety.RedFlagTier.EMERGENT, core_safety.RedFlagTier.URGENT):
             return
 
+        # Brief grace window before claiming the guard: if the realtime
+        # model is also about to call `escalate` for the same turn, its
+        # path will land first and claim, and we'll observe the take
+        # below — no interrupt, no audio overlap. Skipped when no
+        # guard is wired (legacy callers / tests).
+        if guard is not None and _ESCALATION_MODEL_GRACE_SECONDS > 0:
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                await asyncio.sleep(_ESCALATION_MODEL_GRACE_SECONDS)
+
         if guard is not None and not guard.claim():
             log.info(
                 "agent.safety.guard_taken",
@@ -1222,6 +1244,19 @@ def _wire_model_escalate_teardown(
         active_speech["handle"] = handle
 
     async def _finalize(handle: Any, tier_value: str, reason: str) -> None:
+        # Claim immediately on tool-call detection so the safety
+        # screen's grace window observes the take and bails without
+        # interrupting the model's own speech of the script. The
+        # persist / signal / delete side-effects still run after
+        # `wait_for_playout` so the room is not torn down mid-audio.
+        if not guard.claim():
+            log.info(
+                "agent.safety.model_escalate.guard_taken",
+                tier=tier_value,
+                reason=reason,
+            )
+            return
+
         if handle is not None:
             try:
                 await handle.wait_for_playout()
@@ -1231,14 +1266,6 @@ def _wire_model_escalate_teardown(
                     tier=tier_value,
                     error=str(exc),
                 )
-
-        if not guard.claim():
-            log.info(
-                "agent.safety.model_escalate.guard_taken",
-                tier=tier_value,
-                reason=reason,
-            )
-            return
 
         log.warning(
             "agent.safety.escalation",

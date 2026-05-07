@@ -40,6 +40,10 @@ def _silent_classifier(monkeypatch: pytest.MonkeyPatch) -> None:
         return safety.RedFlagResult(tier=safety.RedFlagTier.NONE, source="classifier")
 
     monkeypatch.setattr("agent.session.core_safety.classify", _stub)
+    # Default the model-grace window to zero across this file so tests
+    # that aren't probing the grace behaviour itself don't pay 0.3s of
+    # wallclock each. The two grace-window tests below override this.
+    monkeypatch.setattr("agent.session._ESCALATION_MODEL_GRACE_SECONDS", 0.0)
     fake = Settings(
         supabase_url="https://test.supabase.co",
         supabase_publishable_key="test-publishable",
@@ -738,3 +742,191 @@ async def test_model_path_does_not_speak_or_interrupt(
 
     assert session.said == [], "model path must not call session.say"
     assert session.interrupted == 0, "model path must not call session.interrupt"
+
+
+# ---------------------------------------------------------------------------
+# Grace window — the safety screen waits briefly before claiming so the
+# realtime model can call `escalate` itself and own the script speak.
+# ---------------------------------------------------------------------------
+
+
+def _user_item_event(text: str, item_id: str = "i-1") -> Any:
+    """Build a fake conversation_item_added event with a user item."""
+
+    class _Item:
+        def __init__(self, *, role: str, body: str, ident: str) -> None:
+            self.role = role
+            self._text = body
+            self.id = ident
+
+        def text_content(self) -> str:
+            return self._text
+
+    class _Event:
+        def __init__(self, item: _Item) -> None:
+            self.item = item
+
+    return _Event(_Item(role="user", body=text, ident=item_id))
+
+
+@pytest.mark.asyncio
+async def test_grace_window_lets_model_claim_first_and_screen_bails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """During the grace window the model can call ``escalate`` and claim
+    the guard first; the safety screen observes the take, bails, and —
+    crucially — does not interrupt the model or speak the script.
+
+    With ``_ESCALATION_MODEL_GRACE_SECONDS=0`` this property could not
+    hold: the screen's claim is sub-millisecond and would always beat
+    the model's speech-to-tool-call latency. The grace window is what
+    makes the model-wins-natural-races case observable.
+    """
+    from agent.session import (
+        SESSION_END_TOPIC,
+        EscalationGuard,
+        _wire_model_escalate_teardown,
+        _wire_safety_screen,
+    )
+
+    # Restore a real grace window — long enough that the model's task
+    # runs during it. The autouse fixture pinned it to 0.0.
+    monkeypatch.setattr("agent.session._ESCALATION_MODEL_GRACE_SECONDS", 0.1)
+
+    persists: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "agent.session.core_safety_events.record",
+        lambda *args, **kwargs: persists.append({"args": args, "kwargs": kwargs}),
+    )
+    delete_calls: list[str] = []
+
+    async def _fake_delete(room_name: str, *, log: Any) -> None:
+        delete_calls.append(room_name)
+
+    monkeypatch.setattr("agent.session._delete_room_after_drain", _fake_delete)
+
+    session = _FakeSession()
+    log = _RecordingLogger()
+    deps = _deps()
+    room = _RoomFake()
+    ctx = _JobCtxFake(room)
+    guard = EscalationGuard()
+    conv_id = UUID("33333333-3333-3333-3333-333333333333")
+
+    _wire_safety_screen(session, deps, log, conv_id=conv_id, ctx=ctx, guard=guard)
+    _wire_model_escalate_teardown(session, deps, log, conv_id=conv_id, ctx=ctx, guard=guard)
+
+    # User finalises a tier-1 utterance → safety screen task starts and
+    # enters its grace-window sleep.
+    _fire_conversation_item_added(session, _user_item_event("I am having chest pain"))
+    # Yield long enough for the regex/classifier gather to resolve and
+    # the screen task to be parked in its grace sleep — but well below
+    # the 0.1s grace window.
+    await asyncio.sleep(0.02)
+
+    # Model emits the escalate tool call during the grace window.
+    handle = _FakeSpeechHandle()
+    _fire_speech_created(session, _FakeSpeechCreatedEvent(handle))
+    _fire_function_tools_executed(
+        session,
+        _FakeFunctionToolsExecutedEvent([_escalate_call(tier="emergent")]),
+    )
+
+    # Wait past the grace window so the screen's task wakes, observes
+    # the taken guard, and bails.
+    await asyncio.sleep(0.2)
+    await _drain()
+
+    # Exactly one teardown ran — the model's.
+    assert len(persists) == 1, f"exactly one safety_events row expected; got {len(persists)}"
+    # Position 3 in core_safety_events.record's positional args is `source`.
+    assert persists[0]["args"][3] == "model"
+    assert delete_calls == [room.name]
+    sent_signals = [s for s in room.sent if s["topic"] == SESSION_END_TOPIC]
+    assert len(sent_signals) == 1, "exactly one session-end signal must be emitted"
+
+    # The screen stayed silent — no script spoken, no interrupt issued.
+    assert session.said == [], (
+        "safety screen must not speak the script when the model wins the grace race; "
+        f"got said={session.said}"
+    )
+    assert (
+        session.interrupted == 0
+    ), "safety screen must not interrupt the model when the model wins the grace race"
+
+    # And the screen logged a structured bail so the race is observable.
+    bail_lines = [r for r in log.records if r.get("event") == "agent.safety.guard_taken"]
+    assert bail_lines, "safety screen must log a structured bail when the guard is taken"
+
+
+@pytest.mark.asyncio
+async def test_grace_window_screen_claims_after_grace_when_model_silent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the model never calls ``escalate`` during the grace window,
+    the safety screen claims the guard once the window expires and
+    runs the canned teardown — the floor still fires, just delayed.
+    """
+    from agent.session import (
+        SESSION_END_TOPIC,
+        EscalationGuard,
+        _wire_model_escalate_teardown,
+        _wire_safety_screen,
+    )
+
+    monkeypatch.setattr("agent.session._ESCALATION_MODEL_GRACE_SECONDS", 0.05)
+    # Skip the post-script audio-drain wait so the test settles quickly.
+    monkeypatch.setattr("agent.session._ESCALATION_AUDIO_DRAIN_SECONDS", 0.0)
+
+    persists: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "agent.session.core_safety_events.record",
+        lambda *args, **kwargs: persists.append({"args": args, "kwargs": kwargs}),
+    )
+    delete_calls: list[str] = []
+
+    async def _fake_delete(room_name: str, *, log: Any) -> None:
+        delete_calls.append(room_name)
+
+    monkeypatch.setattr("agent.session._delete_room_after_drain", _fake_delete)
+
+    session = _FakeSession()
+    # The screen path calls `session.say(script, allow_interruptions=False)`
+    # and awaits `SpeechHandle.wait_for_playout()`; replace the file's
+    # default async-only `say` with one that matches the production
+    # interface so the screen-claims branch is observable.
+    spoken: list[str] = []
+
+    class _Handle:
+        async def wait_for_playout(self) -> None:
+            return None
+
+    def _say(text: str, **_kwargs: Any) -> _Handle:
+        spoken.append(text)
+        return _Handle()
+
+    session.say = _say  # type: ignore[assignment]
+    log = _RecordingLogger()
+    deps = _deps()
+    room = _RoomFake()
+    ctx = _JobCtxFake(room)
+    guard = EscalationGuard()
+    conv_id = UUID("33333333-3333-3333-3333-333333333333")
+
+    _wire_safety_screen(session, deps, log, conv_id=conv_id, ctx=ctx, guard=guard)
+    _wire_model_escalate_teardown(session, deps, log, conv_id=conv_id, ctx=ctx, guard=guard)
+
+    _fire_conversation_item_added(session, _user_item_event("I am having chest pain"))
+
+    # Wait past the grace window with no model tool call.
+    await asyncio.sleep(0.15)
+    await _drain()
+
+    # Screen ran the full canned teardown — persisted with regex source,
+    # spoke the script, emitted the signal, deleted the room.
+    assert len(persists) == 1, "screen must persist when the model stays silent"
+    assert persists[0]["args"][3] == "regex"
+    assert delete_calls == [room.name]
+    sent_signals = [s for s in room.sent if s["topic"] == SESSION_END_TOPIC]
+    assert len(sent_signals) == 1
+    assert spoken, "screen must speak the canned escalation script when it claims after the grace"
