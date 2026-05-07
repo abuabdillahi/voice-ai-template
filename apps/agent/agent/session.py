@@ -1007,7 +1007,7 @@ async def _delete_room_after_drain(room_name: str, *, log: Any) -> None:
             await livekit_api.room.delete_room(DeleteRoomRequest(room=room_name))
             log.info("agent.safety.room_deleted", room=room_name)
         finally:
-            await livekit_api.aclose()
+            await livekit_api.aclose()  # type: ignore[no-untyped-call]
     except Exception as exc:  # noqa: BLE001 — best-effort teardown
         log.warning("agent.safety.room_delete_failed", room=room_name, error=str(exc))
 

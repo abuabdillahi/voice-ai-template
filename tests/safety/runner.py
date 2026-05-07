@@ -136,11 +136,27 @@ class _FakeSession:
     def on(self, event: str, handler: Callable[..., Any]) -> None:
         self.listeners.setdefault(event, []).append(handler)
 
-    async def say(self, text: str) -> None:
+    async def say(self, text: str, **_kwargs: Any) -> None:
         self.said.append(text)
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class _FakeLocalParticipant:
+    async def send_text(self, _payload: str, *, topic: str) -> None:
+        del topic
+
+
+class _FakeRoom:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.local_participant = _FakeLocalParticipant()
+
+
+class _FakeJobCtx:
+    def __init__(self, room: _FakeRoom) -> None:
+        self.room = room
 
 
 class _RecordingLogger:
@@ -218,14 +234,23 @@ async def run_script(
         )
         return object()
 
+    async def _stub_delete_room(_room_name: str, *, log: Any) -> None:
+        # Server-side teardown replaced session.aclose() — record the
+        # call as the harness's "session ended" signal.
+        captured.session_closed = True
+
     # Patch the seams. Done at module level so they apply to the live
     # `agent.session` import.
     original_classify = agent_session.core_safety.classify
     original_record = agent_session.core_safety_events.record
     original_get_settings = agent_session.get_settings
+    original_delete_room = agent_session._delete_room_after_drain  # noqa: SLF001
+    original_drain_seconds = agent_session._ESCALATION_AUDIO_DRAIN_SECONDS  # noqa: SLF001
     agent_session.core_safety.classify = _stub_classify  # type: ignore[assignment]
     agent_session.core_safety_events.record = _record_event  # type: ignore[assignment]
     agent_session.get_settings = lambda: fake_settings  # type: ignore[assignment]
+    agent_session._delete_room_after_drain = _stub_delete_room  # type: ignore[assignment]  # noqa: SLF001
+    agent_session._ESCALATION_AUDIO_DRAIN_SECONDS = 0.0  # noqa: SLF001
 
     try:
         session = _FakeSession()
@@ -239,11 +264,13 @@ async def run_script(
             session_id=f"safety-eval-{uuid4()}",
             supabase_access_token="harness-token",
         )
+        ctx = _FakeJobCtx(_FakeRoom(name=f"safety-eval-{script.name}"))
         agent_session._wire_safety_screen(  # noqa: SLF001
             session,
             deps,
             log,
             conv_id=UUID("33333333-3333-3333-3333-333333333333"),
+            ctx=ctx,
         )
 
         for idx, utterance in enumerate(script.user_utterances):
@@ -253,16 +280,17 @@ async def run_script(
             for handler in session.listeners.get("conversation_item_added", []):
                 handler(event)
             # Yield generously — the screen schedules a task that runs
-            # gather + say + aclose; tier-1 paths can take a few cycles.
+            # gather + say + room-delete; tier-1 paths can take a few cycles.
             for _ in range(50):
                 await asyncio.sleep(0)
 
         captured.spoken = list(session.said)
-        captured.session_closed = session.closed
     finally:
         agent_session.core_safety.classify = original_classify  # type: ignore[assignment]
         agent_session.core_safety_events.record = original_record  # type: ignore[assignment]
         agent_session.get_settings = original_get_settings  # type: ignore[assignment]
+        agent_session._delete_room_after_drain = original_delete_room  # type: ignore[assignment]  # noqa: SLF001
+        agent_session._ESCALATION_AUDIO_DRAIN_SECONDS = original_drain_seconds  # noqa: SLF001
 
     return captured
 
