@@ -243,13 +243,15 @@ async def run_script(
     # `agent.session` import.
     session = _FakeSession()
 
+    from core import safety_events as core_safety_events
+
     original_classify = agent_session.core_safety.classify
-    original_record = agent_session.core_safety_events.record
+    original_record = core_safety_events.record
     original_get_settings = agent_session.get_settings
     original_delete_room = agent_session._delete_room_after_drain  # noqa: SLF001
     original_drain_seconds = agent_session._ESCALATION_AUDIO_DRAIN_SECONDS  # noqa: SLF001
     agent_session.core_safety.classify = _stub_classify  # type: ignore[assignment]
-    agent_session.core_safety_events.record = _record_event  # type: ignore[assignment]
+    core_safety_events.record = _record_event  # type: ignore[assignment]
     agent_session.get_settings = lambda: fake_settings  # type: ignore[assignment]
     agent_session._delete_room_after_drain = _stub_delete_room  # type: ignore[assignment]  # noqa: SLF001
     # The production audio-drain delay (0.5s) blocks the asyncio loop
@@ -291,7 +293,7 @@ async def run_script(
         captured.spoken = list(session.said)
     finally:
         agent_session.core_safety.classify = original_classify  # type: ignore[assignment]
-        agent_session.core_safety_events.record = original_record  # type: ignore[assignment]
+        core_safety_events.record = original_record  # type: ignore[assignment]
         agent_session.get_settings = original_get_settings  # type: ignore[assignment]
         agent_session._delete_room_after_drain = original_delete_room  # type: ignore[assignment]  # noqa: SLF001
         agent_session._ESCALATION_AUDIO_DRAIN_SECONDS = original_drain_seconds  # noqa: SLF001

@@ -41,11 +41,12 @@ from uuid import UUID
 import structlog
 from core import conversations as core_conversations
 from core import safety as core_safety
-from core import safety_events as core_safety_events
+from core import safety_events as core_safety_events  # noqa: F401 — re-exported for monkeypatch
 from core import triage as core_triage
 from core.auth import User
 from core.conditions import kb_for_prompt
 from core.config import Settings, get_settings
+from core.escalation import EscalationCoordinator, EscalationGuard
 from core.observability import (
     bind as bind_log_context,
 )
@@ -371,39 +372,6 @@ def build_triage_system_prompt(
 # so any future drift between the alias and the static prompt remains a
 # single source of truth.
 SYSTEM_PROMPT = build_triage_system_prompt([])
-
-
-@dataclass(slots=True)
-class EscalationGuard:
-    """Session-scoped idempotency guard for the two escalation paths.
-
-    Both the server-side safety screen (regex+classifier) and the
-    model-callable ``escalate`` tool can recognise a red flag on the
-    same turn. Without coordination they both run teardown — two
-    ``safety_events`` rows, two session-end signals, two
-    ``delete_room`` calls. The guard makes teardown at-most-once per
-    session.
-
-    A fresh ``EscalationGuard`` is created per :func:`entrypoint` call
-    so a long-running worker does not leak state across sessions; the
-    instance is passed to both :func:`_wire_safety_screen` and
-    :func:`_wire_model_escalate_teardown`.
-    """
-
-    fired: bool = False
-
-    def claim(self) -> bool:
-        """Atomically claim the guard.
-
-        Returns ``True`` for the first caller and ``False`` for every
-        subsequent caller in the same session. The losing caller is
-        expected to log a structured bail event and short-circuit
-        without persisting, signalling, or attempting the room delete.
-        """
-        if self.fired:
-            return False
-        self.fired = True
-        return True
 
 
 @dataclass(slots=True)
@@ -999,6 +967,54 @@ async def _delete_room_after_drain(room_name: str, *, log: Any) -> None:
         log.warning("agent.safety.room_delete_failed", room=room_name, error=str(exc))
 
 
+def _build_escalation_coordinator(
+    session: AgentSession[None],
+    deps: _SessionDeps,
+    log: Any,
+    *,
+    conv_id: UUID | None,
+    ctx: Any | None,
+    guard: EscalationGuard,
+    grace_seconds: float = _ESCALATION_MODEL_GRACE_SECONDS,
+) -> EscalationCoordinator:
+    """Wire LiveKit-specific adapters into a fresh :class:`EscalationCoordinator`.
+
+    The coordinator owns the state machine; the closures below own the
+    LiveKit-specific I/O (TTS, data-channel send_text, room delete).
+    Both ``_wire_safety_screen`` and ``_wire_model_escalate_teardown``
+    build coordinators against the same shared ``guard`` so claims race
+    correctly across the two paths.
+    """
+
+    async def _speak(script: str, tier: str) -> None:
+        await _speak_escalation_script(session, script, log, tier=tier)
+
+    async def _emit(tier: str) -> None:
+        await _emit_session_end_signal(ctx=ctx, log=log, tier=tier, reason="escalation")
+
+    async def _delete() -> None:
+        if ctx is None:
+            return
+        room = getattr(ctx, "room", None)
+        room_name = getattr(room, "name", None) if room is not None else None
+        if room_name:
+            await _delete_room_after_drain(room_name, log=log)
+
+    return EscalationCoordinator(
+        log=log,
+        user=deps.user,
+        session_id=deps.session_id,
+        conv_id=conv_id,
+        supabase_token=deps.supabase_access_token,
+        guard=guard,
+        speak_script=_speak,
+        emit_session_end=_emit,
+        delete_room=_delete,
+        grace_seconds=grace_seconds,
+        audio_drain_seconds=_ESCALATION_AUDIO_DRAIN_SECONDS,
+    )
+
+
 def _wire_safety_screen(
     session: AgentSession[None],
     deps: _SessionDeps,
@@ -1008,28 +1024,34 @@ def _wire_safety_screen(
     ctx: Any | None = None,
     guard: EscalationGuard | None = None,
 ) -> None:
-    """Run the regex red-flag screen on every committed user utterance.
+    """Run the regex + classifier red-flag screen on every committed user utterance.
 
-    This is the server-side safety floor — it runs independently of the
-    realtime model. Tier-1 (``emergent``) and tier-2 (``urgent``) hits
-    play the scripted escalation message via ``session.say(...)``,
-    persist a row to ``safety_events`` (best-effort), end the session,
-    and emit an ``agent.safety.escalation`` structured log line.
-    Slice 06 will run :func:`core.safety.classify` in parallel with the
-    regex layer.
+    Server-side safety floor that runs independently of the realtime
+    model. Tier-1 / tier-2 hits delegate to a :class:`EscalationCoordinator`
+    which speaks the scripted message, persists a ``safety_events``
+    row, signals session end, and tears the room down. The hook is a
+    noop on assistant utterances and on empty / streaming partials.
 
-    The hook is a noop on assistant utterances and on empty / streaming
-    partials — ``conversation_item_added`` fires once per finalised
-    item, with role attached.
-
-    ``conv_id`` is optional: when missing, the audit-log insert is
-    skipped (the safety floor still runs) and the warning log line is
-    the only audit trail. When the supabase access token is missing
-    the same skip-with-warning applies.
+    ``guard`` defaults to a fresh single-path guard when callers (legacy
+    tests) don't supply one. In production, both wire functions share
+    one guard so the two paths race correctly.
     """
 
     fired_for: set[str] = set()
     settings = get_settings()
+    # Legacy callers (tests, the safety eval harness) wire the screen
+    # without a guard; in that case the model-escalate race is moot, so
+    # skip the grace window so the screen escalates immediately.
+    coordinator_guard = guard if guard is not None else EscalationGuard()
+    coordinator = _build_escalation_coordinator(
+        session,
+        deps,
+        log,
+        conv_id=conv_id,
+        ctx=ctx,
+        guard=coordinator_guard,
+        grace_seconds=_ESCALATION_MODEL_GRACE_SECONDS if guard is not None else 0.0,
+    )
 
     async def _screen_and_maybe_escalate(text: str) -> None:
         """Run regex and the classifier in parallel and act on the higher tier.
@@ -1047,84 +1069,13 @@ def _wire_safety_screen(
             regex_result, classifier_result = await asyncio.gather(regex_task, classifier_task)
         except Exception as exc:  # noqa: BLE001 — degrade rather than crash
             log.warning("agent.safety.gather_failed", error=str(exc))
-            # Fall back to regex-only via a synchronous call so the
-            # safety floor still applies.
             regex_result = core_safety.regex_screen(text)
             classifier_result = core_safety.RedFlagResult(
                 tier=core_safety.RedFlagTier.NONE, source="classifier"
             )
 
         result = core_safety.combine(regex_result, classifier_result)
-        if result.tier not in (core_safety.RedFlagTier.EMERGENT, core_safety.RedFlagTier.URGENT):
-            return
-
-        # Brief grace window before claiming the guard: if the realtime
-        # model is also about to call `escalate` for the same turn, its
-        # path will land first and claim, and we'll observe the take
-        # below — no interrupt, no audio overlap. Skipped when no
-        # guard is wired (legacy callers / tests).
-        if guard is not None and _ESCALATION_MODEL_GRACE_SECONDS > 0:
-            import contextlib
-
-            with contextlib.suppress(Exception):
-                await asyncio.sleep(_ESCALATION_MODEL_GRACE_SECONDS)
-
-        if guard is not None and not guard.claim():
-            log.info(
-                "agent.safety.guard_taken",
-                tier=result.tier.value,
-                source=result.source,
-            )
-            return
-
-        log.warning(
-            "agent.safety.escalation",
-            tier=result.tier.value,
-            source=result.source,
-            matched_flags=list(result.matched_flags),
-            user_id=str(deps.user.id),
-            session_id=deps.session_id,
-            conversation_id=str(conv_id) if conv_id is not None else None,
-        )
-        _persist_safety_event(
-            conv_id=conv_id,
-            deps=deps,
-            log=log,
-            result=result,
-            utterance=text,
-        )
-        # Audio first, UI transition second. The user hears the
-        # routing message in full while still on the regular Talk
-        # page; only once the script (and the audio-drain window)
-        # have completed do we emit the session-end signal so the
-        # frontend can swap in the EndOfConversationCard. Emitting before the
-        # script caused the card to render while the audio was still
-        # in flight — users saw the routing copy but never heard it.
-        script = core_safety.escalation_script_for(result.tier)
-        await _speak_escalation_script(session, script, log, tier=result.tier.value)
-        # Brief audio-drain delay so the realtime model's TTS buffer
-        # flushes before we transition the UI / tear the room down.
-        try:
-            import asyncio
-
-            await asyncio.sleep(_ESCALATION_AUDIO_DRAIN_SECONDS)
-        except Exception:  # noqa: BLE001 — sleep should never fail
-            pass
-        await _emit_session_end_signal(
-            ctx=ctx,
-            log=log,
-            tier=result.tier.value,
-            reason="escalation",
-        )
-        # Server-side LiveKit room delete is the authoritative teardown.
-        # By the time we get here the script has played and the signal
-        # has been delivered; deleting the room drops the WebRTC
-        # connection on the client and finishes the flow.
-        if ctx is not None:
-            room = getattr(ctx, "room", None)
-            room_name = getattr(room, "name", None) if room is not None else None
-            if room_name:
-                await _delete_room_after_drain(room_name, log=log)
+        await coordinator.handle_classifier_result(result, text)
 
     def _on_item(event: ConversationItemAddedEvent) -> None:
         item = event.item
@@ -1147,40 +1098,6 @@ def _wire_safety_screen(
     session.on("conversation_item_added", _on_item)
 
 
-def _persist_safety_event_from_model(
-    *,
-    conv_id: UUID | None,
-    deps: _SessionDeps,
-    log: Any,
-    tier: str,
-) -> None:
-    """Record a model-initiated escalation in ``safety_events``.
-
-    Mirrors :func:`_persist_safety_event` but writes a row with
-    ``source="model"``, an empty ``matched_flags`` array, and an empty
-    ``utterance`` — the model's free-text ``reason`` is captured in
-    structured logs rather than overloading ``matched_flags``.
-    """
-    if conv_id is None:
-        log.warning("agent.safety.persist_skipped_no_conversation")
-        return
-    if deps.supabase_access_token is None:
-        log.warning("agent.safety.persist_skipped_no_token")
-        return
-    try:
-        core_safety_events.record(
-            conv_id,
-            deps.user.id,
-            tier,
-            "model",
-            [],
-            "",
-            supabase_token=deps.supabase_access_token,
-        )
-    except Exception as exc:  # noqa: BLE001 — persistence is best-effort
-        log.warning("agent.safety.persist_failed", error=str(exc))
-
-
 def _wire_model_escalate_teardown(
     session: AgentSession[None],
     deps: _SessionDeps,
@@ -1196,20 +1113,23 @@ def _wire_model_escalate_teardown(
 
     * ``speech_created`` records the most-recent assistant speech
       handle. The realtime model emits this event for the turn that
-      contains the ``escalate`` tool call; the handle stays live
-      until ``wait_for_playout`` returns.
+      contains the ``escalate`` tool call; the handle stays live until
+      ``wait_for_playout`` returns.
     * ``function_tools_executed`` looks for a successful ``escalate``
-      call. For tiers ``emergent`` / ``urgent`` the helper awaits the
-      tracked handle's ``wait_for_playout``, then claims the
-      :class:`EscalationGuard` and runs the same teardown as the
-      safety screen (persist → emit session-end → delete room). The
-      script is *not* re-spoken by the agent worker — the model
-      already produced speech for the same turn it issued the tool
-      call, and the system prompt instructs it to mirror the script.
+      call and delegates to the :class:`EscalationCoordinator`, which
+      claims the guard, awaits the tracked handle, persists, signals,
+      and deletes. The script is *not* re-spoken by the agent worker —
+      the model already produced speech for the same turn it issued
+      the tool call.
 
-    Tier ``clinician_soon`` is a no-op: the conversation continues so
-    the user can ask follow-up questions about scheduling care.
+    Tier ``clinician_soon`` is filtered out by the coordinator (no-op:
+    the conversation continues so the user can ask follow-up questions
+    about scheduling care).
     """
+
+    coordinator = _build_escalation_coordinator(
+        session, deps, log, conv_id=conv_id, ctx=ctx, guard=guard
+    )
 
     active_speech: dict[str, Any] = {}
 
@@ -1218,48 +1138,6 @@ def _wire_model_escalate_teardown(
         if handle is None:
             return
         active_speech["handle"] = handle
-
-    async def _finalize(handle: Any, tier_value: str, reason: str) -> None:
-        # Claim immediately on tool-call detection so the safety
-        # screen's grace window observes the take and bails without
-        # interrupting the model's own speech of the script. The
-        # persist / signal / delete side-effects still run after
-        # `wait_for_playout` so the room is not torn down mid-audio.
-        if not guard.claim():
-            log.info(
-                "agent.safety.model_escalate.guard_taken",
-                tier=tier_value,
-                reason=reason,
-            )
-            return
-
-        if handle is not None:
-            try:
-                await handle.wait_for_playout()
-            except Exception as exc:  # noqa: BLE001 — best-effort wait
-                log.warning(
-                    "agent.safety.model_escalate.wait_failed",
-                    tier=tier_value,
-                    error=str(exc),
-                )
-
-        log.warning(
-            "agent.safety.escalation",
-            tier=tier_value,
-            source="model",
-            matched_flags=[],
-            reason=reason,
-            user_id=str(deps.user.id),
-            session_id=deps.session_id,
-            conversation_id=str(conv_id) if conv_id is not None else None,
-        )
-        _persist_safety_event_from_model(conv_id=conv_id, deps=deps, log=log, tier=tier_value)
-        await _emit_session_end_signal(ctx=ctx, log=log, tier=tier_value, reason="escalation")
-        if ctx is not None:
-            room = getattr(ctx, "room", None)
-            room_name = getattr(room, "name", None) if room is not None else None
-            if room_name:
-                await _delete_room_after_drain(room_name, log=log)
 
     def _on_executed(event: FunctionToolsExecutedEvent) -> None:
         for call, _output in event.zipped():
@@ -1271,50 +1149,16 @@ def _wire_model_escalate_teardown(
                 args = {}
             tier_value = args.get("tier") if isinstance(args, dict) else None
             reason = args.get("reason", "") if isinstance(args, dict) else ""
-            if tier_value not in {"emergent", "urgent"}:
+            if not isinstance(tier_value, str):
                 continue
             handle = active_speech.get("handle")
+            wait = handle.wait_for_playout if handle is not None else None
             import asyncio
 
-            asyncio.create_task(_finalize(handle, str(tier_value), str(reason)))
+            asyncio.create_task(coordinator.handle_model_escalation(tier_value, reason, wait))
 
     session.on("speech_created", _on_speech_created)
     session.on("function_tools_executed", _on_executed)
-
-
-def _persist_safety_event(
-    *,
-    conv_id: UUID | None,
-    deps: _SessionDeps,
-    log: Any,
-    result: core_safety.RedFlagResult,
-    utterance: str,
-) -> None:
-    """Record the escalation in ``safety_events``.
-
-    Best-effort: a database failure is logged but does not prevent the
-    escalation script from playing or the session from ending. The
-    safety floor is the script and the session-close; the audit log is
-    valuable but not load-bearing.
-    """
-    if conv_id is None:
-        log.warning("agent.safety.persist_skipped_no_conversation")
-        return
-    if deps.supabase_access_token is None:
-        log.warning("agent.safety.persist_skipped_no_token")
-        return
-    try:
-        core_safety_events.record(
-            conv_id,
-            deps.user.id,
-            result.tier.value,
-            result.source,
-            list(result.matched_flags),
-            utterance,
-            supabase_token=deps.supabase_access_token,
-        )
-    except Exception as exc:  # noqa: BLE001 — persistence is best-effort
-        log.warning("agent.safety.persist_failed", error=str(exc))
 
 
 async def _emit_triage_state(ctx: JobContext, deps: _SessionDeps, log: Any) -> None:
