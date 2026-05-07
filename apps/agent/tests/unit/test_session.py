@@ -354,3 +354,46 @@ def test_static_prompt_instructs_sarjy_self_introduction() -> None:
 
     populated = build_triage_system_prompt([_prior("carpal_tunnel", recall="recall blob")])
     assert "Hi, I'm Sarjy." in populated
+
+
+# ---------------------------------------------------------------------------
+# Clinician-finder prompt branch
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_with_find_clinician_enabled_includes_offer_section_and_rule() -> None:
+    """Enabled feature → six-step offer flow + clinician-names rule rendered."""
+    from agent.session import _TRIAGE_CLINICIAN_NAMES_RULE
+
+    prompt = build_triage_system_prompt([], find_clinician_enabled=True)
+    assert "Clinician-finding flow" in prompt
+    # Six numbered steps (1. through 6.).
+    for marker in ("1. Offer", "2. Capture", "3. Read back", "4. Speak", "5. Invoke", "6. After"):
+        assert marker in prompt
+    # The hard rule is referenced via the constant, not duplicated inline.
+    assert _TRIAGE_CLINICIAN_NAMES_RULE in prompt
+    # Bypass-blocking rule on emergent/urgent paths is present.
+    assert "Bypass-blocking rule" in prompt
+    assert "find_clinician" in prompt
+
+
+def test_prompt_with_find_clinician_disabled_omits_offer_section_and_rule() -> None:
+    """Unset OSM contact email → entire offer section drops, rule drops too."""
+    from agent.session import _TRIAGE_CLINICIAN_NAMES_RULE
+
+    prompt = build_triage_system_prompt([], find_clinician_enabled=False)
+    assert "Clinician-finding flow" not in prompt
+    assert _TRIAGE_CLINICIAN_NAMES_RULE not in prompt
+    assert "find_clinician" not in prompt
+
+
+def test_default_static_prompt_has_find_clinician_section() -> None:
+    """Empty-input invariance: SYSTEM_PROMPT is the new static baseline."""
+    from agent.session import _TRIAGE_CLINICIAN_NAMES_RULE
+
+    assert "Clinician-finding flow" in SYSTEM_PROMPT
+    assert _TRIAGE_CLINICIAN_NAMES_RULE in SYSTEM_PROMPT
+    # The empty-input branch matches SYSTEM_PROMPT byte-for-byte with
+    # the feature enabled by default.
+    assert build_triage_system_prompt([], find_clinician_enabled=True) == SYSTEM_PROMPT
+    assert build_triage_system_prompt(None, find_clinician_enabled=True) == SYSTEM_PROMPT

@@ -32,6 +32,7 @@ from agent.session import (
     build_agent,
 )
 from core.auth import User
+from core.config import Settings
 from core.tools import dispatch
 from core.tools.registry import ToolContext
 
@@ -43,10 +44,35 @@ def _deps() -> _SessionDeps:
     )
 
 
-def test_agent_registers_only_triage_allowlist_tools() -> None:
-    agent = build_agent(_deps())
+def _settings(**overrides: object) -> Settings:
+    base: dict[str, object] = {
+        "supabase_url": "https://test.supabase.co",
+        "supabase_publishable_key": "test-publishable",
+        "supabase_jwks_url": "https://test.supabase.co/auth/v1/.well-known/jwks.json",
+        "livekit_url": "wss://test.livekit.cloud",
+        "livekit_api_key": "lk-test-key",  # pragma: allowlist secret
+        "livekit_api_secret": "lk-test-secret",  # pragma: allowlist secret
+        "openai_api_key": "sk-test-openai",  # pragma: allowlist secret
+    }
+    base.update(overrides)
+    return Settings(**base)  # type: ignore[arg-type]
+
+
+def test_agent_registers_full_triage_allowlist_when_find_clinician_is_enabled() -> None:
+    agent = build_agent(_deps(), settings=_settings(osm_contact_email="ops@example.com"))
     registered_names = {t.info.name for t in agent.tools}  # type: ignore[union-attr]
     assert registered_names == set(TRIAGE_TOOL_NAMES)
+
+
+def test_agent_drops_find_clinician_when_contact_email_is_unset() -> None:
+    """No OSM contact email → tool is filtered, prompt branch is omitted."""
+    agent = build_agent(_deps(), settings=_settings(osm_contact_email=None))
+    registered_names = {t.info.name for t in agent.tools}  # type: ignore[union-attr]
+    assert "find_clinician" not in registered_names
+    # The other four triage tools still register.
+    assert {"record_symptom", "get_differential", "recommend_treatment", "escalate"}.issubset(
+        registered_names
+    )
 
 
 def test_record_symptom_is_in_the_triage_allowlist() -> None:
@@ -63,6 +89,11 @@ def test_recommend_treatment_and_get_differential_are_in_the_triage_allowlist() 
 def test_escalate_is_in_the_triage_allowlist() -> None:
     """Slice 04 introduces the model-callable `escalate` tool."""
     assert "escalate" in TRIAGE_TOOL_NAMES
+
+
+def test_find_clinician_is_in_the_triage_allowlist() -> None:
+    """The clinician-finder feature adds the `find_clinician` tool."""
+    assert "find_clinician" in TRIAGE_TOOL_NAMES
 
 
 def test_system_prompt_advertises_the_safety_floor_and_escalate_tool() -> None:
@@ -105,7 +136,7 @@ def test_agent_does_not_register_preference_or_memory_or_example_tools() -> None
     The modules behind these tools remain in source as kept public API
     (ADR 0006); the assertion is on the agent's *registered* tool set.
     """
-    agent = build_agent(_deps())
+    agent = build_agent(_deps(), settings=_settings(osm_contact_email="ops@example.com"))
     registered_names = {t.info.name for t in agent.tools}  # type: ignore[union-attr]
     forbidden = {
         "set_preference",

@@ -27,9 +27,13 @@ from dataclasses import dataclass
 class Condition:
     """One office-strain condition the triage agent can reason about.
 
-    The shape is intentionally flat. Every field is required and every
-    field renders into the system-prompt block. Adding a new field is
-    a coordinated change across :func:`kb_for_prompt` and the realtime
+    The shape is intentionally flat. Every field is required. The
+    interview-relevant fields render into the system-prompt block via
+    :func:`kb_for_prompt`; the referral-metadata fields
+    (``specialist_label``, ``specialist_osm_filters``) are read by the
+    ``find_clinician`` tool path and deliberately do not bleed into the
+    symptom-interview prompt. Adding a new prompt-rendered field is a
+    coordinated change across :func:`kb_for_prompt` and the realtime
     prompt's instruction language; refusing optional fields keeps the
     prompt schema stable across record additions.
     """
@@ -43,6 +47,8 @@ class Condition:
     expected_timeline: str
     red_flags: tuple[str, ...]
     sources: tuple[str, ...]
+    specialist_label: str
+    specialist_osm_filters: tuple[str, ...]
 
 
 CONDITIONS: dict[str, Condition] = {
@@ -82,6 +88,11 @@ CONDITIONS: dict[str, Condition] = {
         sources=(
             "AAOS OrthoInfo — Carpal Tunnel Syndrome (orthoinfo.aaos.org)",
             "NIOSH — Musculoskeletal Disorders and Workplace Factors",
+        ),
+        specialist_label="physiotherapist or occupational therapist",
+        specialist_osm_filters=(
+            "healthcare=physiotherapist",
+            "healthcare=occupational_therapist",
         ),
     ),
     "computer_vision_syndrome": Condition(
@@ -123,6 +134,11 @@ CONDITIONS: dict[str, Condition] = {
             "American Optometric Association — Computer Vision Syndrome",
             "NIOSH — Computer Workstation Ergonomics",
         ),
+        specialist_label="optometrist",
+        specialist_osm_filters=(
+            "healthcare=optometrist",
+            "shop=optician",
+        ),
     ),
     "tension_type_headache": Condition(
         id="tension_type_headache",
@@ -161,6 +177,12 @@ CONDITIONS: dict[str, Condition] = {
         sources=(
             "International Classification of Headache Disorders (ICHD-3) — Tension-Type Headache",
             "AAFP — Diagnosis and Treatment of Tension-Type Headache",
+        ),
+        specialist_label="general practitioner",
+        specialist_osm_filters=(
+            "amenity=doctors",
+            "healthcare=doctor",
+            "healthcare=general_practitioner",
         ),
     ),
     "upper_trapezius_strain": Condition(
@@ -203,6 +225,8 @@ CONDITIONS: dict[str, Condition] = {
             "American Physical Therapy Association — Posture and Neck Pain Guidance",
             "OSHA — Computer Workstation Ergonomics",
         ),
+        specialist_label="physiotherapist",
+        specialist_osm_filters=("healthcare=physiotherapist",),
     ),
     "lumbar_strain": Condition(
         id="lumbar_strain",
@@ -246,6 +270,8 @@ CONDITIONS: dict[str, Condition] = {
             "American College of Physicians — Noninvasive Treatments for Acute, Subacute, and Chronic Low Back Pain",
             "OSHA — Ergonomics for Prolonged Sitting",
         ),
+        specialist_label="physiotherapist",
+        specialist_osm_filters=("healthcare=physiotherapist",),
     ),
 }
 

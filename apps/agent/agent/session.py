@@ -138,14 +138,16 @@ _ESCALATION_MODEL_GRACE_SECONDS = 0.3
 
 # Allowlist of tool names the realtime model is permitted to call.
 # Slice 02 added `record_symptom`; slice 03 adds `get_differential`
-# and `recommend_treatment`; slice 04 adds `escalate`. Tools
-# registered with `core.tools` (preferences, memory, examples) are
-# deliberately excluded.
+# and `recommend_treatment`; slice 04 adds `escalate`; the
+# clinician-finder feature adds `find_clinician`. Tools registered
+# with `core.tools` (preferences, memory, examples) are deliberately
+# excluded.
 TRIAGE_TOOL_NAMES: tuple[str, ...] = (
     "record_symptom",
     "get_differential",
     "recommend_treatment",
     "escalate",
+    "find_clinician",
 )
 
 
@@ -185,9 +187,37 @@ _TRIAGE_NUMBERS_RULE = (
     "block. New specifics this session must come fresh from "
     "`recommend_treatment` for the matching condition."
 )
+_TRIAGE_CLINICIAN_NAMES_RULE = (
+    "Never speak a clinic name, address, or phone number that did not come "
+    "from a `find_clinician` tool result on this turn. The model's own "
+    "knowledge is not a source for clinician names."
+)
 
 
-def _build_static_triage_prompt(*, is_returning_user: bool = False) -> str:
+_FIND_CLINICIAN_PROMPT_SECTION = f"""\
+Clinician-finding flow. This step runs ONLY after you have already spoken the conservative-treatment read-back from `recommend_treatment` (so the user has heard the protocol and you have a known `condition_id` in hand) OR after an `escalate(tier='clinician_soon', ...)`. Speak the read-back first; the clinician offer is the *next* turn, not the same one.
+
+When you do reach that next turn:
+
+1. Offer as a question. Ask the user whether they would like you to find the relevant specialist near them — for carpal tunnel say "a physiotherapist or occupational therapist", for computer vision syndrome say "an optometrist", for tension-type headache say "a GP", and for the trapezius and lumbar conditions say "a physiotherapist". Phrasing example: "Would you like me to find a physiotherapist near you?" Never assume the offer is wanted; if the user declines, drop the topic and close the conversation normally.
+2. Capture the location verbally. If the user accepts, ask them what city, town, or postcode they are in. Do not propose using browser geolocation; the user discloses verbally.
+3. Read back what you heard. Repeat the locality back to the user before searching, e.g. "I have you in Brooklyn — is that right?" Wait for confirmation before invoking the tool. Speech-to-text mishears (e.g. "Newcastle" vs "New Castle") are caught here.
+4. Speak a brief filler line before invoking the tool. Say something like "Let me have a look around your area — one moment." so the user knows you are working during the upstream HTTP latency.
+5. Invoke `find_clinician(condition_id, location)` using the `condition_id` you already have in hand from `recommend_treatment` or the `clinician_soon` escalate call. Never guess a condition_id.
+6. After the tool returns, speak a one-line summary that names the single closest clinic from the result list, points the user to the on-screen list for the rest, and adds a "double-check the details before calling — OSM data can be out of date" caveat. The visual card list carries the full names, addresses, phone numbers, and links; do not read all five aloud.
+
+If the tool returns an `error` field, paraphrase the error string to the user. Do not invent results, do not retry the tool — the failure is the user's signal to act elsewhere (e.g. searching Google Maps directly, as the error message itself suggests).
+
+{_TRIAGE_CLINICIAN_NAMES_RULE}
+
+Bypass-blocking rule. Do not offer clinician finding on the emergent or urgent escalation paths — those paths close the session structurally; mentioning the offer there delays a 911 redirection. Do not call `find_clinician` without a known `condition_id`; if the user demands clinician finding before the OPQRST interview is far enough along to identify a condition, decline cleanly and continue the interview."""
+
+
+def _build_static_triage_prompt(
+    *,
+    is_returning_user: bool = False,
+    find_clinician_enabled: bool = True,
+) -> str:
     """Compose the static triage system prompt with the embedded knowledge base.
 
     Built lazily so the rendered ``kb_for_prompt()`` block is computed
@@ -195,19 +225,25 @@ def _build_static_triage_prompt(*, is_returning_user: bool = False) -> str:
     so tests can call it directly to assert prompt shape without
     standing up a session.
 
-    The prompt includes the two new triage rules verbatim — the opener
-    rule and the numbers-forbidden rule — even when no prior-session
-    block is rendered. The opener rule is a no-op when its precondition
-    ("Most recent session" block present) does not hold, and the
-    numbers-forbidden rule reinforces the existing hard rule on
-    treatment specifics. Keeping the rules unconditional means a fresh
-    user session and a returning-user session run under the same set
-    of rules — only the prepended block changes.
+    The prompt includes the two recall-related triage rules verbatim —
+    the opener rule and the numbers-forbidden rule — even when no
+    prior-session block is rendered. The opener rule is a no-op when
+    its precondition ("Most recent session" block present) does not
+    hold, and the numbers-forbidden rule reinforces the existing hard
+    rule on treatment specifics. Keeping the rules unconditional means
+    a fresh user session and a returning-user session run under the
+    same set of rules — only the prepended block changes.
 
     When ``is_returning_user`` is ``True`` the load-bearing self-
     introduction rule swaps to the short refresher and the full
     "open every new conversation with this disclaimer" instruction is
     omitted — the on-screen banner carries the visual scope reminder.
+
+    When ``find_clinician_enabled`` is ``False`` (because
+    :class:`Settings.osm_contact_email` is unset) the new clinician-
+    finding section and the unsourced-clinician-names hard rule are
+    omitted entirely so the model is not instructed to call a tool
+    that has not been registered. The rest of the prompt is unchanged.
     """
     in_scope = (
         "carpal tunnel syndrome, computer vision syndrome (digital eye strain), "
@@ -229,6 +265,7 @@ def _build_static_triage_prompt(*, is_returning_user: bool = False) -> str:
             "explain that you are an educational tool, not a doctor, and not a "
             "substitute for professional medical advice.\n\n"
         )
+    clinician_section = _FIND_CLINICIAN_PROMPT_SECTION + "\n\n" if find_clinician_enabled else ""
     return f"""\
 You are an educational triage assistant for office-strain symptoms. You are not a doctor and you are not a substitute for medical advice. You are a tool that helps the user think about whether and how to seek further care.
 
@@ -256,7 +293,7 @@ When you have gathered enough OPQRST slots to form a working hypothesis, call `g
 
 Hard rule on numerical specifics: never speak a treatment protocol, stretch duration, exercise rep count, contraindication, or numerical timeline that did not come from `recommend_treatment` for the matching condition. If you find yourself about to speak a number or a specific protocol step, you must have read it from a `recommend_treatment` payload first. The model's own knowledge is not a source.
 
-Cross-session recall rules:
+{clinician_section}Cross-session recall rules:
 - {_TRIAGE_OPENER_RULE}
 - {_TRIAGE_NUMBERS_RULE}
 
@@ -314,6 +351,7 @@ def build_triage_system_prompt(
     prior_sessions: list[core_conversations.PriorSession] | None = None,
     *,
     is_returning_user: bool = False,
+    find_clinician_enabled: bool = True,
 ) -> str:
     """Compose the per-session triage system prompt.
 
@@ -330,10 +368,19 @@ def build_triage_system_prompt(
       short refresher composes with the existing "Most recent session"
       prior-condition block.
 
+    ``find_clinician_enabled`` toggles the new clinician-finding
+    prompt section: when the agent worker has detected that
+    ``OSM_CONTACT_EMAIL`` is unset and dropped the ``find_clinician``
+    tool from the registered tool set, this flag is set to ``False``
+    so the model is not instructed to call a tool that does not exist.
+
     Pure function: tests assert the rendered string directly without
     standing up an :class:`AgentSession`.
     """
-    static_prompt = _build_static_triage_prompt(is_returning_user=is_returning_user)
+    static_prompt = _build_static_triage_prompt(
+        is_returning_user=is_returning_user,
+        find_clinician_enabled=find_clinician_enabled,
+    )
     sessions = prior_sessions or []
     if not sessions:
         return static_prompt
@@ -461,16 +508,36 @@ def _make_livekit_tool(schema_name: str, deps: _SessionDeps) -> Any:
     return _invoke
 
 
+def _resolve_triage_tool_names(settings: Settings | None = None) -> tuple[str, ...]:
+    """Filter :data:`TRIAGE_TOOL_NAMES` against the runtime feature flags.
+
+    The find-clinician feature is gated on
+    :class:`Settings.osm_contact_email`: when unset, the tool is
+    filtered out of the registered list so the realtime model is not
+    handed a callable surface that would surface a "maps unavailable"
+    error mid-conversation. The corresponding system-prompt branch
+    (``find_clinician_enabled=False``) drops the offer language so the
+    feature is silently disabled, not surfaced.
+    """
+    resolved = settings or get_settings()
+    if resolved.osm_contact_email:
+        return TRIAGE_TOOL_NAMES
+    return tuple(name for name in TRIAGE_TOOL_NAMES if name != "find_clinician")
+
+
 def build_agent(
     deps: _SessionDeps | None = None,
     *,
     instructions: str | None = None,
+    settings: Settings | None = None,
 ) -> Agent:
     """Construct the :class:`Agent` with the system prompt and tools.
 
     When ``deps`` is omitted, the agent is built without tools. The
     session entrypoint always passes ``deps`` so the live agent has
-    whatever the triage allowlist :data:`TRIAGE_TOOL_NAMES` exposes.
+    whatever the triage allowlist :data:`TRIAGE_TOOL_NAMES` exposes —
+    after :func:`_resolve_triage_tool_names` filters tools whose
+    feature flags are not set.
 
     ``instructions`` overrides the default :data:`SYSTEM_PROMPT` so
     tests can inject a tailored prompt without re-rendering the full
@@ -480,7 +547,8 @@ def build_agent(
     if deps is None:
         return Agent(instructions=prompt)
 
-    tools = [_make_livekit_tool(name, deps) for name in TRIAGE_TOOL_NAMES]
+    tool_names = _resolve_triage_tool_names(settings)
+    tools = [_make_livekit_tool(name, deps) for name in tool_names]
     return Agent(instructions=prompt, tools=list(tools))
 
 
@@ -1431,8 +1499,15 @@ async def entrypoint(ctx: JobContext) -> None:
     is_returning_user = core_conversations.has_prior_session(user, supabase_token=supabase_token)
     if is_returning_user:
         log.info("agent.disclaimer.short_branch")
-    instructions = build_triage_system_prompt(prior_sessions, is_returning_user=is_returning_user)
-    agent = build_agent(deps, instructions=instructions)
+    find_clinician_enabled = bool(settings.osm_contact_email)
+    if not find_clinician_enabled:
+        log.warning("agent.find_clinician.disabled_no_contact_email")
+    instructions = build_triage_system_prompt(
+        prior_sessions,
+        is_returning_user=is_returning_user,
+        find_clinician_enabled=find_clinician_enabled,
+    )
+    agent = build_agent(deps, instructions=instructions, settings=settings)
 
     _wire_tool_call_forwarding(
         session,
@@ -1471,7 +1546,7 @@ async def entrypoint(ctx: JobContext) -> None:
         worker_id=ctx.worker_id,
         room=ctx.room.name,
         user_id=user_id_str,
-        tools=list(TRIAGE_TOOL_NAMES),
+        tools=list(_resolve_triage_tool_names(settings)),
     )
 
     try:

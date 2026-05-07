@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ClinicianSuggestions } from '@/components/clinician-suggestions';
 import { cn } from '@/lib/utils';
 
 /**
@@ -113,6 +114,19 @@ export function ConversationView({ id }: { id: string }) {
 
 function MessageBubble({ message }: { message: MessageItem }) {
   if (message.role === 'tool') {
+    if (message.tool_name === 'find_clinician') {
+      const resultStr =
+        typeof message.tool_result === 'string'
+          ? message.tool_result
+          : message.tool_result === null || message.tool_result === undefined
+            ? null
+            : JSON.stringify(message.tool_result);
+      return (
+        <li>
+          <ClinicianSuggestions result={resultStr} />
+        </li>
+      );
+    }
     return (
       <li className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 px-3 py-2">
         <div className="flex items-center justify-between gap-2">

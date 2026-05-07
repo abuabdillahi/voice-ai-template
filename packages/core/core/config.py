@@ -126,6 +126,33 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- OpenStreetMap (clinician finder) ---
+    # The contact email is the OSMF usage-policy obligation: the
+    # User-Agent on every Nominatim/Overpass request embeds it so the
+    # public instance can reach an operator if our traffic misbehaves.
+    # When unset, ``core.clinician.find_clinics`` returns the
+    # network-unavailable failure string and the agent worker filters
+    # the ``find_clinician`` tool out of the registered tool set so the
+    # feature is silently disabled rather than surfacing a runtime error
+    # mid-conversation. The base URLs are overridable so tests and
+    # alternative hosts (e.g. self-hosted Overpass) can swap them.
+    osm_contact_email: str | None = Field(
+        default=None,
+        description=(
+            "Operator contact email embedded in the User-Agent on every "
+            "Nominatim/Overpass request (OSMF usage-policy requirement). "
+            "When unset, the find_clinician tool is disabled."
+        ),
+    )
+    nominatim_base_url: str = Field(
+        default="https://nominatim.openstreetmap.org",
+        description="Base URL of the Nominatim geocoding service.",
+    )
+    overpass_base_url: str = Field(
+        default="https://overpass-api.de/api/interpreter",
+        description="Base URL of the Overpass POI-search interpreter.",
+    )
+
     # --- HTTP / observability ---
     cors_origins: str = Field(
         default="http://localhost:5173",

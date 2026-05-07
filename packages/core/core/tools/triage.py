@@ -23,8 +23,9 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 
-from core import safety, triage
+from core import clinician, safety, triage
 from core.conditions import CONDITIONS
+from core.config import Settings, get_settings
 from core.tools.registry import ToolContext, tool
 
 # Confidence threshold for `recommend_treatment`. The system prompt
@@ -33,6 +34,12 @@ from core.tools.registry import ToolContext, tool
 # threshold. Surfaced as a module-level constant so the prompt language
 # and the dispatch-time guard share one source of truth.
 RECOMMEND_TREATMENT_CONFIDENCE_THRESHOLD = 0.15
+
+# Caps the number of clinic suggestions the `find_clinician` tool will
+# ever return — referenced from both the system prompt language and
+# the underlying :func:`core.clinician.find_clinics` so the limit and
+# the prompt stay in lockstep.
+FIND_CLINICIAN_RESULT_LIMIT = 5
 
 # Surfaced as a module constant so the tool description and the
 # system-prompt language can stay in lockstep. The tool's docstring is
@@ -147,6 +154,16 @@ async def recommend_treatment(ctx: ToolContext, condition_id: str) -> str:
         )
 
     payload = asdict(condition)
+    # Strip referral metadata. ``specialist_label`` and
+    # ``specialist_osm_filters`` are inputs to ``find_clinician``; they
+    # are not part of the symptom-interview read-back the realtime
+    # model speaks here. Leaving them in caused the model to see clinic-
+    # adjacent fields and trip on the unsourced-clinician-names rule,
+    # going silent after the tool call. The find-clinician path reads
+    # both fields directly off ``core.conditions.CONDITIONS``, so the
+    # tool wrapper does not need to forward them through the model.
+    for referral_field in ("specialist_label", "specialist_osm_filters"):
+        payload.pop(referral_field, None)
     # Convert tuples to lists so the JSON wire shape is stable across
     # downstream consumers that round-trip through standard JSON.
     for key, value in payload.items():
@@ -204,9 +221,61 @@ async def escalate(ctx: ToolContext, tier: str, reason: str) -> str:
     )
 
 
+@tool(
+    name="find_clinician",
+    description=(
+        "Find healthcare providers near the user, scoped to the specialist "
+        "appropriate for the given condition. Call this only after a successful "
+        "`recommend_treatment` or a `clinician_soon` escalation, and only after "
+        "the user has verbally consented AND confirmed their location with a "
+        "read-back. The condition_id must match one of the ids in the embedded "
+        "knowledge base. The location is a short free-form locality string (city, "
+        "town, or postcode) — the tool geocodes it via OpenStreetMap. Returns a "
+        "JSON object with the resolved locality, the radius searched, and a list "
+        "of up to 5 nearby clinics (name, address, phone, OSM URL, distance_km). "
+        "On failure, returns a JSON object with an `error` field; paraphrase that "
+        "error to the user — do not invent results."
+    ),
+)
+async def find_clinician(ctx: ToolContext, condition_id: str, location: str) -> str:
+    """Geocode the user's locality and return nearby clinics.
+
+    Thin wrapper over :func:`core.clinician.find_clinics`. Validates
+    the two cheap, deterministic inputs (``condition_id`` against the
+    catalogue, ``location`` non-empty) up front so the structured log
+    line names the failure mode without the geocode round-trip; the
+    rest of the failure taxonomy lives in the underlying module.
+    """
+    if condition_id not in CONDITIONS:
+        ctx.log.warning("find_clinician.unknown_condition", condition_id=condition_id)
+        return json.dumps(
+            {
+                "error": (
+                    "I don't have a referral path for that condition. Let me "
+                    "know what you've been experiencing and we can take it "
+                    "from the top."
+                )
+            }
+        )
+    if not location or not location.strip():
+        ctx.log.warning("find_clinician.empty_location")
+        return json.dumps(
+            {
+                "error": (
+                    "I didn't catch a location — could you tell me what city " "or area you're in?"
+                )
+            }
+        )
+
+    settings: Settings = get_settings()
+    return await clinician.find_clinics(condition_id, location, settings=settings)
+
+
 __all__ = [
+    "FIND_CLINICIAN_RESULT_LIMIT",
     "RECOMMEND_TREATMENT_CONFIDENCE_THRESHOLD",
     "escalate",
+    "find_clinician",
     "get_differential",
     "recommend_treatment",
     "record_symptom",

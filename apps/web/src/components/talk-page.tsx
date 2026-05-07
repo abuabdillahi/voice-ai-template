@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { EndOfConversationCard } from '@/components/end-of-conversation-card';
+import { ClinicianSuggestions } from '@/components/clinician-suggestions';
 import { TriageSlots } from '@/components/triage-slots';
 import { cn } from '@/lib/utils';
 
@@ -280,7 +281,13 @@ function TranscriptPanel({ entries }: { entries: TranscriptEntry[] }) {
     <ul className="flex flex-col gap-2 text-sm">
       {items.map((entry) =>
         entry.role === 'tool-call' ? (
-          <ToolCallEntry key={entry.id} entry={entry} />
+          entry.text === 'find_clinician' ? (
+            <li key={entry.id}>
+              <ClinicianSuggestions result={entry.result ?? null} />
+            </li>
+          ) : (
+            <ToolCallEntry key={entry.id} entry={entry} />
+          )
         ) : (
           <UtteranceEntry key={entry.id} entry={entry} />
         ),

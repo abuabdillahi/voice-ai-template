@@ -241,6 +241,8 @@ async def run_script(
 
     # Patch the seams. Done at module level so they apply to the live
     # `agent.session` import.
+    session = _FakeSession()
+
     original_classify = agent_session.core_safety.classify
     original_record = agent_session.core_safety_events.record
     original_get_settings = agent_session.get_settings
@@ -250,10 +252,12 @@ async def run_script(
     agent_session.core_safety_events.record = _record_event  # type: ignore[assignment]
     agent_session.get_settings = lambda: fake_settings  # type: ignore[assignment]
     agent_session._delete_room_after_drain = _stub_delete_room  # type: ignore[assignment]  # noqa: SLF001
+    # The production audio-drain delay (0.5s) blocks the asyncio loop
+    # past the harness's bounded yield budget; zeroing it lets the
+    # escalation flow run to completion under offline test conditions.
     agent_session._ESCALATION_AUDIO_DRAIN_SECONDS = 0.0  # noqa: SLF001
 
     try:
-        session = _FakeSession()
         log = _RecordingLogger()
         deps = agent_session._SessionDeps(  # noqa: SLF001
             user=User(

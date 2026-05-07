@@ -92,3 +92,96 @@ def test_kb_for_prompt_includes_each_records_first_defining_symptom() -> None:
 def test_kb_for_prompt_is_stable_across_invocations() -> None:
     """Pure function: same input → same output. No hidden state."""
     assert kb_for_prompt() == kb_for_prompt()
+
+
+def test_each_record_has_a_non_empty_specialist_label() -> None:
+    for condition_id, condition in CONDITIONS.items():
+        assert condition.specialist_label.strip(), f"{condition_id} missing specialist_label"
+
+
+def test_each_record_has_at_least_one_specialist_osm_filter() -> None:
+    for condition_id, condition in CONDITIONS.items():
+        assert isinstance(condition.specialist_osm_filters, tuple)
+        assert (
+            len(condition.specialist_osm_filters) >= 1
+        ), f"{condition_id} missing specialist_osm_filters"
+
+
+def test_specialist_osm_filters_parse_to_key_equals_value_shape() -> None:
+    """Every filter is OSM tag syntax: exactly one ``=`` with non-empty sides."""
+    for condition_id, condition in CONDITIONS.items():
+        for entry in condition.specialist_osm_filters:
+            parts = entry.split("=")
+            assert len(parts) == 2, f"{condition_id} filter {entry!r} must contain exactly one '='"
+            key, value = parts
+            assert key.strip(), f"{condition_id} filter {entry!r} has empty key"
+            assert value.strip(), f"{condition_id} filter {entry!r} has empty value"
+
+
+def test_kb_for_prompt_does_not_render_specialist_referral_metadata() -> None:
+    """Referral metadata is for the tool path, not the interview prompt.
+
+    Asserts the new fields' content does not surface in the rendered
+    prompt block — the symptom-interview prompt schema must stay
+    byte-identical to the pre-clinician-finder baseline.
+    """
+    prompt = kb_for_prompt()
+    for condition in CONDITIONS.values():
+        assert (
+            condition.specialist_label not in prompt
+        ), f"specialist_label for {condition.id} leaked into kb_for_prompt()"
+        for entry in condition.specialist_osm_filters:
+            assert entry not in prompt, (
+                f"specialist_osm_filters entry {entry!r} for "
+                f"{condition.id} leaked into kb_for_prompt()"
+            )
+
+
+def test_kb_for_prompt_matches_pre_referral_baseline() -> None:
+    """Byte-for-byte regression anchor for the rendered prompt block.
+
+    Captured before the ``specialist_label`` and
+    ``specialist_osm_filters`` fields were introduced. If a future
+    change to the dataclass or to :func:`kb_for_prompt` legitimately
+    needs to alter the prompt, regenerate this fixture intentionally.
+    """
+    prompt = kb_for_prompt()
+    expected = _KB_FOR_PROMPT_BASELINE
+    assert prompt == expected
+
+
+_KB_FOR_PROMPT_BASELINE = "\n\n".join(
+    "## {name} (id: {id})\n"
+    "\n"
+    "Defining symptoms:\n"
+    "{defining}\n"
+    "\n"
+    "Discriminators:\n"
+    "{discriminators}\n"
+    "\n"
+    "Conservative treatment:\n"
+    "{treatment}\n"
+    "\n"
+    "Contraindications:\n"
+    "{contraindications}\n"
+    "\n"
+    "Expected timeline:\n"
+    "{timeline}\n"
+    "\n"
+    "Condition-specific red flags:\n"
+    "{red_flags}\n"
+    "\n"
+    "Sources:\n"
+    "{sources}".format(
+        id=c.id,
+        name=c.name,
+        defining="\n".join(f"- {s}" for s in c.defining_symptoms),
+        discriminators="\n".join(f"- {s}" for s in c.discriminators),
+        treatment="\n".join(f"- {s}" for s in c.conservative_treatment),
+        contraindications="\n".join(f"- {s}" for s in c.contraindications),
+        timeline=c.expected_timeline,
+        red_flags="\n".join(f"- {s}" for s in c.red_flags),
+        sources="\n".join(f"- {s}" for s in c.sources),
+    )
+    for c in CONDITIONS.values()
+)

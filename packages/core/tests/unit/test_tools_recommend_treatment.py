@@ -102,6 +102,27 @@ async def test_recommend_treatment_payload_includes_source_citations() -> None:
         assert source.strip()
 
 
+@pytest.mark.asyncio
+async def test_recommend_treatment_strips_referral_metadata_from_payload() -> None:
+    """Referral fields stay out of the realtime model's read-back payload.
+
+    ``specialist_label`` and ``specialist_osm_filters`` are inputs to
+    the ``find_clinician`` tool path. Forwarding them through
+    ``recommend_treatment`` surfaces clinic-adjacent strings to the
+    realtime model, which then trips on the unsourced-clinician-names
+    hard rule and stops speaking after the tool returns. Pin the
+    contract: the wire payload contains the symptom-interview fields
+    only.
+    """
+    for condition_id in CONDITIONS:
+        result = await dispatch("recommend_treatment", {"condition_id": condition_id}, _ctx())
+        payload = json.loads(result)
+        assert "specialist_label" not in payload, f"{condition_id} payload leaked specialist_label"
+        assert (
+            "specialist_osm_filters" not in payload
+        ), f"{condition_id} payload leaked specialist_osm_filters"
+
+
 # --- get_differential ---------------------------------------------------------
 
 
