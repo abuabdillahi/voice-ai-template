@@ -31,16 +31,19 @@ describe('SignInForm', () => {
 
   it('renders email and password fields', () => {
     render(<SignInForm />);
-    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/^email$/i)).toBeInTheDocument();
+    // The redesigned form has a "Show password" toggle button that
+    // also matches a loose `/password/i` query, so we anchor the
+    // regex to the field label exactly.
+    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument();
   });
 
   it('shows validation messages for invalid input', async () => {
     const user = userEvent.setup();
     render(<SignInForm />);
 
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/valid email address/i)).toBeInTheDocument();
@@ -55,14 +58,14 @@ describe('SignInForm', () => {
     const user = userEvent.setup();
     render(<SignInForm onSignedIn={onSignedIn} />);
 
-    await user.type(screen.getByLabelText(/email/i), 'alice@example.com');
-    await user.type(screen.getByLabelText(/password/i), 'correct-horse');
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.type(screen.getByLabelText(/^email$/i), 'alice@example.com');
+    await user.type(screen.getByLabelText(/^password$/i), 'correct-horse');
+    await user.click(screen.getByRole('button', { name: /^sign in$/i }));
 
     await waitFor(() => {
       expect(signInMock).toHaveBeenCalledWith({
         email: 'alice@example.com',
-        password: 'correct-horse',
+        password: 'correct-horse', // pragma: allowlist secret
       });
     });
     expect(onSignedIn).toHaveBeenCalled();

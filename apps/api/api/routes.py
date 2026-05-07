@@ -141,6 +141,37 @@ def livekit_token(
     return LivekitTokenResponse(token=token, url=settings.livekit_url, room=room)
 
 
+class PriorSessionStatusResponse(BaseModel):
+    """Whether the user has spoken to Sarjy before.
+
+    The frontend pre-connect surface pairs this signal with the safety
+    card: first-time visitors see the full amber disclaimer permanently,
+    returning users see the collapsed pill. The same predicate
+    (:func:`core.conversations.has_prior_session`) is what the agent
+    consults to choose between the long opener and the short refresher,
+    so the visual treatment stays in lockstep with what the agent says.
+    """
+
+    is_returning_user: bool = Field(
+        description="True when the user has at least two prior conversation rows.",
+    )
+
+
+@router.get(
+    "/sessions/prior-status",
+    response_model=PriorSessionStatusResponse,
+    tags=["voice"],
+)
+def prior_session_status(
+    current_user: Annotated[User, Depends(get_current_user)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> PriorSessionStatusResponse:
+    """Return whether the authenticated user has any prior conversation rows."""
+    access_token = _bearer_token(authorization)
+    is_returning = conversations.has_prior_session(current_user, supabase_token=access_token)
+    return PriorSessionStatusResponse(is_returning_user=is_returning)
+
+
 class PreferencesResponse(BaseModel):
     """Flat key-value map of the authenticated user's preferences.
 

@@ -1,9 +1,5 @@
-import { Link, useNavigate } from '@tanstack/react-router';
-
-import { supabase } from '@/lib/supabase';
-import { SarjyLogo } from '@/components/sarjy-logo';
+import { AppHeader } from '@/components/app-header';
 import { TalkPage } from '@/components/talk-page';
-import { Button } from '@/components/ui/button';
 
 /**
  * The five MVP conditions surfaced in the scope statement. The agent's
@@ -26,48 +22,29 @@ export const IN_SCOPE_CONDITIONS = [
  * suite can render it without mocking out `@tanstack/react-router`'s
  * `createFileRoute`.
  *
- * Layout: educational-tool disclaimer banner, then a scope statement
- * naming the in-scope conditions, then the talk button. The memory
- * sidebar from the template's home page is intentionally absent —
- * triage is single-session and the cross-session "what I remember
- * about you" surface is an avoidable hallucination risk for a
- * medical-adjacent product.
+ * Layout: an app-wide header with Talk/History nav and sign-out, then
+ * the talk surface. The pre-connect mode of the talk surface owns the
+ * disclaimer and scope panels, so they live next to the "Start
+ * talking" CTA where the user is making the decision instead of as
+ * walls of text above an unrelated card.
  */
 export function SarjyHome() {
-  const navigate = useNavigate();
-
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="flex items-center justify-between border-b border-[hsl(var(--border))] px-6 py-3">
-        <div className="flex items-center gap-2">
-          <SarjyLogo size={28} />
-          <h1 className="text-lg font-semibold">Sarjy</h1>
-        </div>
-        <nav className="flex items-center gap-2">
-          <Button asChild variant="link" size="sm">
-            <Link to="/history">History</Link>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={async () => {
-              await supabase.auth.signOut();
-              void navigate({ to: '/sign-in' });
-            }}
-          >
-            Sign out
-          </Button>
-        </nav>
-      </header>
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-6">
-        <DisclaimerBanner />
-        <ScopeStatement />
+      <AppHeader active="talk" />
+      <main className="flex-1">
         <TalkPage />
       </main>
     </div>
   );
 }
 
+/**
+ * Standalone disclaimer banner. The talk page now owns the visible
+ * disclaimer surface (see `talk-page.tsx#DisclaimerSafetyCard`) — this
+ * component remains for direct re-use by routes/tests that want the
+ * load-bearing copy in isolation.
+ */
 export function DisclaimerBanner() {
   return (
     <section
@@ -85,6 +62,12 @@ export function DisclaimerBanner() {
   );
 }
 
+/**
+ * Standalone scope statement. Same lifecycle as `DisclaimerBanner` —
+ * the talk page renders an equivalent treatment inline; this is the
+ * direct-render form used by tests and any route that wants the
+ * literal in-scope list.
+ */
 export function ScopeStatement() {
   return (
     <section

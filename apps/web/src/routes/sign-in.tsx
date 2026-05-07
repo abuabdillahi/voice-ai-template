@@ -19,9 +19,5 @@ function SignInPage() {
     }
   }, [session, navigate]);
 
-  return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <SignInForm onSignedIn={() => void navigate({ to: '/' })} />
-    </div>
-  );
+  return <SignInForm onSignedIn={() => void navigate({ to: '/' })} />;
 }

@@ -12,16 +12,16 @@ import type { TriageStatePayload } from '@/lib/livekit-transcript';
  * rather than free-styling.
  */
 export const TRIAGE_SLOTS = [
-  { key: 'location', label: 'Location' },
-  { key: 'onset', label: 'Onset' },
-  { key: 'duration', label: 'Duration' },
-  { key: 'quality', label: 'Quality' },
-  { key: 'severity', label: 'Severity' },
-  { key: 'aggravators', label: 'Aggravators' },
-  { key: 'relievers', label: 'Relievers' },
-  { key: 'radiation', label: 'Radiation' },
-  { key: 'prior_episodes', label: 'Prior episodes' },
-  { key: 'occupation_context', label: 'Desk / context' },
+  { key: 'location', label: 'Location', plain: 'Where it hurts' },
+  { key: 'onset', label: 'Onset', plain: 'When it started' },
+  { key: 'duration', label: 'Duration', plain: 'How long each episode' },
+  { key: 'quality', label: 'Quality', plain: 'What it feels like' },
+  { key: 'severity', label: 'Severity', plain: 'How bad, 0–10' },
+  { key: 'aggravators', label: 'Aggravators', plain: 'What makes it worse' },
+  { key: 'relievers', label: 'Relievers', plain: 'What makes it better' },
+  { key: 'radiation', label: 'Radiation', plain: 'Does it travel' },
+  { key: 'prior_episodes', label: 'Prior episodes', plain: 'Has this happened before' },
+  { key: 'occupation_context', label: 'Desk / context', plain: 'Your workstation setup' },
 ] as const;
 
 const TRIAGE_STATE_TOPIC = 'lk.triage-state';

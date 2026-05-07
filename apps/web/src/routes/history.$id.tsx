@@ -3,16 +3,10 @@ import { useQuery } from '@tanstack/react-query';
 
 import { apiFetch, ApiError } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
+import { AppHeader } from '@/components/app-header';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ClinicianSuggestions } from '@/components/clinician-suggestions';
-import { cn } from '@/lib/utils';
+import { TranscriptCard, formatClockTime, type TranscriptItem } from '@/components/transcript-card';
 
-/**
- * Wire shape of `GET /conversations/{id}`. Mirrors
- * `ConversationDetailResponse` in `apps/api/api/routes.py`.
- */
 interface ConversationDetailResponse {
   id: string;
   started_at: string;
@@ -46,18 +40,14 @@ function ConversationRoute() {
   const { id } = useParams({ from: '/history/$id' });
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="flex items-center justify-between border-b border-[hsl(var(--border))] px-6 py-3">
-        <h1 className="text-lg font-semibold">Conversation</h1>
-        <nav className="flex items-center gap-2">
-          <Button asChild variant="link" size="sm">
-            <Link to="/history">Back to history</Link>
-          </Button>
-          <Button asChild variant="link" size="sm">
-            <Link to="/">Talk</Link>
-          </Button>
-        </nav>
-      </header>
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-4 py-6">
+      <AppHeader active="history" />
+      <main className="mx-auto flex w-full max-w-[1180px] flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+        <Link
+          to="/history"
+          className="inline-flex items-center gap-1.5 text-[13px] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+        >
+          ← All conversations
+        </Link>
         <ConversationView id={id} />
       </main>
     </div>
@@ -65,9 +55,21 @@ function ConversationRoute() {
 }
 
 /**
- * Renders the ordered transcript with role-styled bubbles and
- * timestamps. Tool messages are styled distinctly so they read as a
- * third message type rather than a malformed assistant turn.
+ * Detail view for a single past conversation.
+ *
+ * Layout:
+ *  - A hero summary panel that promotes the LLM-generated `summary`
+ *    string (the most useful artifact of the session) to first-class
+ *    body copy, with timestamp + duration as supporting metadata and
+ *    a "Continue" CTA back to /. The OPQRST snapshot would live here
+ *    too once the API persists the final triage state on the detail
+ *    response — the wire shape exposes a `metadata` bag for that
+ *    purpose; populating it is a backend follow-up.
+ *  - The full transcript renders below, with `find_clinician` tool
+ *    messages keeping their inline rich-card treatment and other
+ *    tool messages reduced to one-line "Updated triage: …" chips.
+ *    The previous JSON-`<pre>` developer chrome is gone from the
+ *    user-facing surface.
  */
 export function ConversationView({ id }: { id: string }) {
   const { data, isLoading, isError, error } = useQuery({
@@ -91,99 +93,123 @@ export function ConversationView({ id }: { id: string }) {
   }
   if (!data) return null;
 
+  const startedAtMs = Date.parse(data.started_at);
+  const endedAtMs = data.ended_at ? Date.parse(data.ended_at) : null;
+  const headerLabel = formatHistoryHeader(startedAtMs, endedAtMs);
+  const items = data.messages.map(messageToTranscriptItem);
+
+  const summaryText = data.summary ?? 'No summary yet — the conversation may still be in progress.';
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{formatTimestamp(data.started_at)}</CardTitle>
-          <CardDescription>
-            {data.summary ?? 'No summary yet — the conversation may still be in progress.'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ul className="flex flex-col gap-2 text-sm">
-            {data.messages.map((m) => (
-              <MessageBubble key={m.id} message={m} />
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
+    <div className="flex flex-col gap-3 sm:gap-4">
+      {/* Mobile: compact outcome card with a tier-style left accent
+          and the summary as body copy — matches the handoff's mobile
+          history detail. Desktop keeps the larger serif headline so
+          the page hero still reads. */}
+      <section
+        className="rounded-[calc(var(--radius))] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 sm:p-6 sm:[border-left-width:1px]"
+        style={{
+          borderLeftColor: 'hsl(var(--tier-routine))',
+          borderLeftWidth: 3,
+        }}
+      >
+        <div className="mb-2 flex items-center gap-2 sm:mb-3">
+          <Badge
+            variant="outline"
+            className="font-mono text-[10.5px] uppercase tracking-wide sm:text-[11px]"
+          >
+            {headerLabel}
+          </Badge>
+        </div>
+        {/* Mobile renders the summary as compact body copy (matches
+            the handoff's outcome card); desktop promotes it to a
+            serif headline. One element with responsive typography so
+            the DOM exposes a single source of truth — important for
+            the test harness's `getByText` assertions. */}
+        <h1 className="text-[13px] font-normal leading-[1.5] text-[hsl(var(--foreground))] sm:font-serif sm:text-[26px] sm:leading-[1.2]">
+          {summaryText}
+        </h1>
+      </section>
+
+      <TranscriptCard
+        items={items}
+        frozen
+        title="Transcript"
+        className="min-h-[360px] max-h-[640px] sm:min-h-[420px]"
+      />
     </div>
   );
 }
 
-function MessageBubble({ message }: { message: MessageItem }) {
+/**
+ * Adapt a server-side :data:`MessageItem` to the shared
+ * :data:`TranscriptItem` shape. The bubble + tool-call rendering
+ * lives in :mod:`components/transcript-card`; this function only
+ * reshapes the wire payload.
+ */
+function messageToTranscriptItem(message: MessageItem): TranscriptItem {
+  const ts = Date.parse(message.created_at);
+  const timestamp = Number.isNaN(ts) ? undefined : ts;
   if (message.role === 'tool') {
-    if (message.tool_name === 'find_clinician') {
-      const resultStr =
-        typeof message.tool_result === 'string'
-          ? message.tool_result
-          : message.tool_result === null || message.tool_result === undefined
-            ? null
-            : JSON.stringify(message.tool_result);
-      return (
-        <li>
-          <ClinicianSuggestions result={resultStr} />
-        </li>
-      );
-    }
-    return (
-      <li className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40 px-3 py-2">
-        <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-2">
-            <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
-              tool
-            </Badge>
-            <code className="font-mono text-xs">{message.tool_name ?? 'unknown'}</code>
-          </span>
-          <time className="text-[10px] text-[hsl(var(--muted-foreground))]">
-            {formatTimestamp(message.created_at)}
-          </time>
-        </div>
-        {message.tool_args ? (
-          <pre className="mt-1 overflow-x-auto rounded bg-[hsl(var(--background))] p-2 font-mono text-xs">
-            {JSON.stringify(message.tool_args, null, 2)}
-          </pre>
-        ) : null}
-        {message.tool_result !== null && message.tool_result !== undefined ? (
-          <pre className="mt-1 overflow-x-auto rounded bg-[hsl(var(--background))] p-2 font-mono text-xs">
-            {typeof message.tool_result === 'string'
-              ? message.tool_result
-              : JSON.stringify(message.tool_result, null, 2)}
-          </pre>
-        ) : null}
-      </li>
-    );
+    const resultStr =
+      typeof message.tool_result === 'string'
+        ? message.tool_result
+        : message.tool_result === null || message.tool_result === undefined
+          ? null
+          : JSON.stringify(message.tool_result);
+    return {
+      kind: 'tool-call',
+      id: message.id,
+      toolName: message.tool_name ?? 'tool',
+      toolArgs: message.tool_args,
+      toolResult: resultStr,
+      timestamp,
+    };
   }
-  const isUser = message.role === 'user';
-  return (
-    <li
-      data-role={message.role}
-      className={cn(
-        'rounded-md px-3 py-2',
-        isUser
-          ? 'bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]'
-          : 'bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]',
-      )}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <Badge
-          variant={isUser ? 'default' : 'secondary'}
-          className="text-[10px] uppercase tracking-wide"
-        >
-          {message.role}
-        </Badge>
-        <time className="text-[10px] text-[hsl(var(--muted-foreground))]">
-          {formatTimestamp(message.created_at)}
-        </time>
-      </div>
-      <p className="mt-1 whitespace-pre-wrap">{message.content}</p>
-    </li>
-  );
+  return {
+    kind: 'utterance',
+    id: message.id,
+    role: message.role === 'user' ? 'user' : 'assistant',
+    text: message.content,
+    timestamp,
+  };
 }
 
-function formatTimestamp(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
+/**
+ * Header label for the history detail hero: "Today · 2:41 PM · 6m 43s"
+ * per the design. The previous implementation used `toLocaleString()`
+ * which honored the user's locale, producing right-to-left Arabic
+ * text on Arabic systems and other unexpected formats. The design's
+ * grammar is intentional, English-only, so we format it ourselves.
+ */
+function formatHistoryHeader(startedAtMs: number, endedAtMs: number | null): string {
+  if (Number.isNaN(startedAtMs)) return '';
+  const day = formatRelativeDay(startedAtMs);
+  const time = formatClockTime(startedAtMs);
+  const parts = [day, time];
+  if (endedAtMs && !Number.isNaN(endedAtMs) && endedAtMs > startedAtMs) {
+    parts.push(formatDuration(startedAtMs, endedAtMs));
+  }
+  return parts.join(' · ');
+}
+
+function formatRelativeDay(ms: number): string {
+  const d = new Date(ms);
+  const today = new Date();
+  const startOfDay = (date: Date): number =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const days = Math.round((startOfDay(today) - startOfDay(d)) / 86_400_000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days > 1 && days < 7) {
+    return d.toLocaleDateString('en-US', { weekday: 'long' });
+  }
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatDuration(startedAtMs: number, endedAtMs: number): string {
+  const totalSeconds = Math.round((endedAtMs - startedAtMs) / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }

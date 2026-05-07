@@ -81,8 +81,14 @@ describe('ConversationView', () => {
       expect(screen.getByText('what is the weather in Berlin?')).toBeInTheDocument();
     });
     expect(screen.getByText('It is 20 degrees in Berlin.')).toBeInTheDocument();
+    // Tool calls are summarised as a one-line "Updated triage: …" chip
+    // rather than the previous JSON `<pre>` chrome. The tool name is
+    // surfaced as the friendly label; the raw `tool_result` JSON is
+    // intentionally NOT rendered on the user-facing transcript.
     expect(screen.getByText('get_weather')).toBeInTheDocument();
-    expect(screen.getByText('It is 20 degrees.')).toBeInTheDocument();
+    expect(screen.queryByText('It is 20 degrees.')).toBeNull();
+    // The page heading promotes the LLM summary to first-class body
+    // copy in the hero panel.
     expect(screen.getByText('Talked about the weather')).toBeInTheDocument();
 
     // Role-styled bubbles: user vs assistant get distinct styling. We

@@ -2,13 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-// `TalkPage` transitively imports the LiveKit client; stub it so this
-// test focuses on the disclaimer + scope structure rather than the
-// WebRTC ceremony exercised in `TalkPage.test.tsx`.
+// `TalkPage` transitively imports the LiveKit client and owns the
+// pre-connect disclaimer/scope/start-talking hero in the redesigned
+// layout. The home shell test stubs it to a placeholder so we can
+// focus on the chrome (header + nav + sign-out + talk-page slot)
+// without re-asserting the talk-page internals — those have their own
+// suite.
 vi.mock('@/components/talk-page', () => ({
   TalkPage: () => (
-    <button type="button" aria-label="Connect">
-      Connect
+    <button type="button" aria-label="Start talking">
+      Start talking
     </button>
   ),
 }));
@@ -43,33 +46,31 @@ function renderWithProviders(ui: React.ReactElement) {
 }
 
 describe('SarjyHome', () => {
-  it('renders the Sarjy product header', () => {
+  it('renders the Sarjy wordmark in the app header', () => {
     renderWithProviders(<SarjyHome />);
-    expect(screen.getByRole('heading', { level: 1, name: /^sarjy$/i })).toBeInTheDocument();
+    // The wordmark is the "Sarjy" text adjacent to the equalizer logo
+    // SVG in the AppHeader. The redesign drops the standalone <h1>
+    // because the wordmark is brand-mark-shaped.
+    expect(screen.getAllByLabelText(/sarjy/i).length).toBeGreaterThan(0);
   });
 
-  it('renders the educational-tool disclaimer banner', () => {
+  it('exposes Talk and History navigation', () => {
     renderWithProviders(<SarjyHome />);
-    const disclaimer = screen.getByRole('region', { name: /educational tool disclaimer/i });
-    expect(disclaimer).toBeInTheDocument();
-    expect(disclaimer).toHaveTextContent(/educational tool, not a doctor/i);
-    expect(disclaimer).toHaveTextContent(/not a substitute/i);
-    expect(disclaimer).toHaveTextContent(/Sarjy helps you think about office-strain symptoms/);
+    // The router's <Link> mock renders an `<a>` without `href`, which
+    // strips the implicit `link` role per the ARIA spec — assert via
+    // visible text instead so the test is robust to that mock detail.
+    expect(screen.getByText(/^Talk$/)).toBeInTheDocument();
+    expect(screen.getByText(/^History$/)).toBeInTheDocument();
   });
 
-  it('lists the five in-scope conditions in the scope statement', () => {
+  it('exposes a sign-out affordance in the header', () => {
     renderWithProviders(<SarjyHome />);
-    const scope = screen.getByRole('region', { name: /what this tool can help with/i });
-    expect(scope).toHaveTextContent(/carpal tunnel/i);
-    expect(scope).toHaveTextContent(/computer vision syndrome/i);
-    expect(scope).toHaveTextContent(/tension-type headache/i);
-    expect(scope).toHaveTextContent(/text neck|trapezius/i);
-    expect(scope).toHaveTextContent(/lumbar/i);
+    expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
   });
 
-  it('renders the talk-button affordance', () => {
+  it('renders the talk-page slot (start-talking affordance)', () => {
     renderWithProviders(<SarjyHome />);
-    expect(screen.getByRole('button', { name: /connect/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start talking/i })).toBeInTheDocument();
   });
 
   it('does not render the memory sidebar', () => {

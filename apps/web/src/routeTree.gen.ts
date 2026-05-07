@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as SessionEndRouteImport } from './routes/session-end'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as HistoryIndexRouteImport } from './routes/history.index'
@@ -18,6 +19,11 @@ import { Route as HistoryIdRouteImport } from './routes/history.$id'
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SessionEndRoute = SessionEndRouteImport.update({
+  id: '/session-end',
+  path: '/session-end',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HistoryRoute = HistoryRouteImport.update({
@@ -44,12 +50,14 @@ const HistoryIdRoute = HistoryIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/history': typeof HistoryRouteWithChildren
+  '/session-end': typeof SessionEndRoute
   '/sign-in': typeof SignInRoute
   '/history/$id': typeof HistoryIdRoute
   '/history/': typeof HistoryIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/session-end': typeof SessionEndRoute
   '/sign-in': typeof SignInRoute
   '/history/$id': typeof HistoryIdRoute
   '/history': typeof HistoryIndexRoute
@@ -58,21 +66,36 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/history': typeof HistoryRouteWithChildren
+  '/session-end': typeof SessionEndRoute
   '/sign-in': typeof SignInRoute
   '/history/$id': typeof HistoryIdRoute
   '/history/': typeof HistoryIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/history' | '/sign-in' | '/history/$id' | '/history/'
+  fullPaths:
+    | '/'
+    | '/history'
+    | '/session-end'
+    | '/sign-in'
+    | '/history/$id'
+    | '/history/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/sign-in' | '/history/$id' | '/history'
-  id: '__root__' | '/' | '/history' | '/sign-in' | '/history/$id' | '/history/'
+  to: '/' | '/session-end' | '/sign-in' | '/history/$id' | '/history'
+  id:
+    | '__root__'
+    | '/'
+    | '/history'
+    | '/session-end'
+    | '/sign-in'
+    | '/history/$id'
+    | '/history/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   HistoryRoute: typeof HistoryRouteWithChildren
+  SessionEndRoute: typeof SessionEndRoute
   SignInRoute: typeof SignInRoute
 }
 
@@ -83,6 +106,13 @@ declare module '@tanstack/react-router' {
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/session-end': {
+      id: '/session-end'
+      path: '/session-end'
+      fullPath: '/session-end'
+      preLoaderRoute: typeof SessionEndRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/history': {
@@ -132,6 +162,7 @@ const HistoryRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   HistoryRoute: HistoryRouteWithChildren,
+  SessionEndRoute: SessionEndRoute,
   SignInRoute: SignInRoute,
 }
 export const routeTree = rootRouteImport

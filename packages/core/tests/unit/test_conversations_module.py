@@ -737,11 +737,11 @@ def test_list_recent_with_recall_without_token_raises() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_has_prior_session_true_when_count_at_least_one(
+def test_has_prior_session_true_when_count_at_least_two(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """At least one conversation row → returning user, short refresher path."""
-    client = _FakeClient(data=[{"id": str(uuid4())}])
+    """At least two conversation rows → returning user, short refresher path."""
+    client = _FakeClient(data=[{"id": str(uuid4())}, {"id": str(uuid4())}])
     monkeypatch.setattr("core.conversations.get_user_client", lambda *_a, **_k: client)
 
     assert conversations.has_prior_session(_USER, supabase_token=_TOKEN) is True
@@ -750,11 +750,17 @@ def test_has_prior_session_true_when_count_at_least_one(
     assert ("user_id", str(_USER.id)) in eq_calls
 
 
-def test_has_prior_session_false_when_count_zero(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No prior rows → first-time user, full disclaimer path."""
+def test_has_prior_session_false_when_count_below_two(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fewer than two prior rows → first-time/in-progress user, full disclaimer path."""
     client = _FakeClient(data=[])
     monkeypatch.setattr("core.conversations.get_user_client", lambda *_a, **_k: client)
 
+    assert conversations.has_prior_session(_USER, supabase_token=_TOKEN) is False
+
+    one_row_client = _FakeClient(data=[{"id": str(uuid4())}])
+    monkeypatch.setattr("core.conversations.get_user_client", lambda *_a, **_k: one_row_client)
     assert conversations.has_prior_session(_USER, supabase_token=_TOKEN) is False
 
 

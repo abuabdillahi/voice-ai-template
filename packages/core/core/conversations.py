@@ -575,7 +575,7 @@ def has_prior_session(
     *,
     supabase_token: str | None = None,
 ) -> bool:
-    """Return ``True`` when the user has at least one prior conversation row.
+    """Return ``True`` when the user has at least two prior conversation rows.
 
     Distinct from :func:`list_recent_with_recall` which filters to
     *condition-bearing* rows: the disclaimer-branching signal is
@@ -596,7 +596,7 @@ def has_prior_session(
             client.table(_CONVERSATIONS_TABLE)
             .select("id")
             .eq("user_id", str(user.id))
-            .limit(1)
+            .limit(2)
             .execute()
         )
     except Exception as exc:  # noqa: BLE001 — degrade rather than crash
@@ -607,7 +607,7 @@ def has_prior_session(
         )
         return False
     rows = cast(_list[dict[str, Any]], response.data or [])
-    return len(rows) >= 1
+    return len(rows) >= 2
 
 
 def list_recent_with_recall(
