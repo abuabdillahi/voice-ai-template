@@ -260,11 +260,6 @@ function MobileLayout({
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
-                {isSignup ? (
-                  <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
-                    We&apos;ll send a verification link to confirm your email.
-                  </p>
-                ) : null}
                 <FormMessage />
               </FormItem>
             )}
@@ -391,14 +386,9 @@ function DesktopLayout({
             })}
           </div>
 
-          <h2 className="mb-1.5 text-xl font-semibold tracking-tight">
+          <h2 className="mb-6 text-xl font-semibold tracking-tight">
             {mode === 'sign-in' ? 'Welcome back.' : 'Create your account.'}
           </h2>
-          <p className="mb-6 text-[13.5px] text-[hsl(var(--muted-foreground))]">
-            {mode === 'sign-in'
-              ? 'Enter your email to continue.'
-              : "Email and a password. We'll send a verification link."}
-          </p>
 
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
