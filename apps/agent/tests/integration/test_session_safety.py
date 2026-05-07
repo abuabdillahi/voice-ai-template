@@ -111,7 +111,14 @@ class _FakeEvent:
 
 
 class _FakeSession:
-    """Captures listener registration and `say`/`aclose` calls."""
+    """Captures listener registration and `say`/`aclose` calls.
+
+    The agent worker calls ``session.say(script, allow_interruptions=False)``
+    and then awaits ``SpeechHandle.wait_for_playout()`` (see
+    :func:`agent.session._speak_escalation_script`). The fake mirrors
+    that shape: ``say`` is a sync call returning a handle whose
+    ``wait_for_playout`` is awaited.
+    """
 
     def __init__(self) -> None:
         self.listeners: dict[str, list[Any]] = {}
@@ -121,11 +128,17 @@ class _FakeSession:
     def on(self, event: str, handler: Any) -> None:
         self.listeners.setdefault(event, []).append(handler)
 
-    async def say(self, text: str) -> None:
+    def say(self, text: str, **_kwargs: Any) -> _SpeechHandleFake:
         self.said.append(text)
+        return _SpeechHandleFake()
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class _SpeechHandleFake:
+    async def wait_for_playout(self) -> None:
+        return None
 
 
 def _fire(session: _FakeSession, event: _FakeEvent) -> None:
@@ -531,11 +544,12 @@ class _RealtimeFakeSession:
         if self._timeline is not None:
             self._timeline.append("interrupt")
 
-    async def say(self, text: str) -> None:
+    def say(self, text: str, **_kwargs: Any) -> _SpeechHandleFake:
         self.calls.append("say")
         self.said.append(text)
         if self._timeline is not None:
             self._timeline.append("say")
+        return _SpeechHandleFake()
 
     async def aclose(self) -> None:
         self.closed = True
@@ -631,7 +645,7 @@ async def test_escalation_emits_session_end_signal_after_script(
     Audio first, then UI transition: the user hears the routing
     message in full while still on the regular Talk page, and only
     once the spoken script (and the audio drain) have finished does
-    the EndOfCallCard replace the transcript. Emitting before the
+    the EndOfConversationCard replace the transcript. Emitting before the
     script caused the card to flash up while the audio was still
     arriving — the user saw the routing copy but never heard it.
     """
@@ -756,6 +770,147 @@ async def test_escalation_uses_room_delete_as_server_side_fallback(
     assert delete_calls == [
         "user-abc"
     ], f"server-side room delete must run with the room name; got {delete_calls}"
+
+
+class _NoBargeInRealtimeModel:
+    """Stand-in for the realtime model. Records turn_detection updates."""
+
+    def __init__(self) -> None:
+        self.update_calls: list[dict[str, Any]] = []
+
+    def update_options(self, **kwargs: Any) -> None:
+        self.update_calls.append(kwargs)
+
+
+class _NoBargeInFakeSession:
+    """Realtime fake that records say() kwargs, the playout wait, and llm.update_options.
+
+    Production hit: the urgent escalation script was being cut off
+    mid-playback (sometimes audio_duration=0.0) because the realtime
+    model's *server-side* turn detection cancels the TTS stream the
+    moment VAD picks up audio. ``session.say(script,
+    allow_interruptions=False)`` is silently downgraded — livekit
+    logs ``"the RealtimeModel uses a server-side turn detection,
+    allow_interruptions cannot be False"`` and resets the flag — so
+    the only working knob is to disable ``turn_detection`` on the
+    realtime model itself before the script plays.
+
+    The fix is therefore three-fold:
+
+    1. ``llm.update_options(turn_detection=None)`` — drop server VAD
+       so the framework will honour ``allow_interruptions=False``.
+    2. ``session.say(script, allow_interruptions=False)`` — mark the
+       routing copy non-interruptible.
+    3. ``await SpeechHandle.wait_for_playout()`` — wait for full
+       audio playout before teardown.
+    """
+
+    def __init__(self) -> None:
+        self.listeners: dict[str, list[Any]] = {}
+        self.said: list[dict[str, Any]] = []
+        self.interrupted = 0
+        self.llm = _NoBargeInRealtimeModel()
+
+    def on(self, event: str, handler: Any) -> None:
+        self.listeners.setdefault(event, []).append(handler)
+
+    async def interrupt(self) -> None:
+        self.interrupted += 1
+
+    def say(self, text: str, **kwargs: Any) -> _NoBargeInSpeechHandle:
+        record: dict[str, Any] = {"text": text, "kwargs": kwargs}
+        self.said.append(record)
+        handle = _NoBargeInSpeechHandle()
+        record["handle"] = handle
+        return handle
+
+    async def aclose(self) -> None:
+        return None
+
+
+class _NoBargeInSpeechHandle:
+    def __init__(self) -> None:
+        self.wait_calls = 0
+
+    async def wait_for_playout(self) -> None:
+        self.wait_calls += 1
+
+
+@pytest.mark.asyncio
+async def test_escalation_script_is_non_interruptible_and_waits_for_playout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The safety script must finish playing before teardown — no barge-in.
+
+    Regression: production logs showed the urgent script's TTS
+    stream cancelled mid-second-sentence (``cancelled=True`` on the
+    second TTS chunk). Allowing interruption on the routing message
+    means a poorly-timed "yes" or "okay" from the user — or VAD
+    pickup of background noise — cuts off the routing copy and the
+    user never hears the rest. AC: "the user hears the routing
+    message in full while still on the regular Talk page".
+    """
+    monkeypatch.setattr(
+        "agent.session.core_safety_events.record",
+        lambda *a, **k: None,
+    )
+
+    async def _no_delete(*_a: Any, **_k: Any) -> None:
+        return None
+
+    monkeypatch.setattr("agent.session._delete_room_after_drain", _no_delete)
+    monkeypatch.setattr("agent.session._ESCALATION_AUDIO_DRAIN_SECONDS", 0.0)
+
+    session = _NoBargeInFakeSession()
+    log = _RecordingLogger()
+    deps = _SessionDeps(
+        user=User(id=UUID("11111111-1111-1111-1111-111111111111"), email="a@b"),
+        log=log,
+        session_id="user-abc",
+        supabase_access_token="user-jwt",
+    )
+    room = _RoomFake()
+    ctx = _JobCtxFake(room)
+
+    _wire_safety_screen(
+        session,
+        deps,
+        log,
+        conv_id=UUID("33333333-3333-3333-3333-333333333333"),
+        ctx=ctx,
+    )
+    _fire(session, _FakeEvent(_FakeItem(role="user", text="I am having chest pain")))
+    await _drain()
+
+    assert session.said, "the script must have been spoken"
+    spoken = session.said[0]
+    assert spoken["kwargs"].get("allow_interruptions") is False, (
+        "the escalation script must be non-interruptible so VAD or a stray "
+        "user word does not cut off the routing message; "
+        f"got kwargs={spoken['kwargs']}"
+    )
+    handle = spoken["handle"]
+    assert handle.wait_calls == 1, (
+        "the safety hook must explicitly await SpeechHandle.wait_for_playout() "
+        "so the audio finishes before teardown; "
+        f"got wait_calls={handle.wait_calls}"
+    )
+
+    # Server-side turn detection on the realtime model must be disabled
+    # before the say() runs, otherwise the framework silently downgrades
+    # ``allow_interruptions=False`` to True (logged warning:
+    # "the RealtimeModel uses a server-side turn detection,
+    # allow_interruptions cannot be False") and the VAD on the OpenAI
+    # side cancels the TTS stream the moment the user vocalises. The
+    # call must precede the say() in the call sequence.
+    turn_detection_disables = [
+        c for c in session.llm.update_calls if c.get("turn_detection") is None
+    ]
+    assert turn_detection_disables, (
+        "the safety hook must call session.llm.update_options(turn_detection=None) "
+        "before say() so the realtime model honours allow_interruptions=False; "
+        f"got update_calls={session.llm.update_calls}"
+    )
 
 
 @pytest.mark.asyncio

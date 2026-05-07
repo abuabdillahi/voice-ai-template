@@ -116,9 +116,9 @@ describe('useSessionEndSignal', () => {
     // the lifetime of the page. The 500ms audio-drain timer in
     // `talk-page.tsx` triggers `room.disconnect()`, which fires
     // `RoomEvent.Disconnected` synchronously — if the hook reset on
-    // that event, the EndOfCallCard would vanish ~half a second after
-    // it appeared and the user would land back on the regular Talk
-    // page with no record of why the call ended.
+    // that event, the EndOfConversationCard would vanish ~half a second
+    // after it appeared and the user would land back on the regular Talk
+    // page with no record of why the conversation ended.
     const { result } = renderHook(() =>
       useSessionEndSignal(room as unknown as Parameters<typeof useSessionEndSignal>[0]),
     );

@@ -114,9 +114,9 @@ TRIAGE_STATE_TOPIC = "lk.triage-state"
 #   {"reason": "escalation", "tier": "emergent" | "urgent"}
 #
 # The frontend subscribes via `useSessionEndSignal(room)` and renders a
-# tier-aware end-of-call card in place of the transcript. The `reason`
-# field is open for future expansion (e.g. "out_of_scope") but only
-# "escalation" is emitted by the safety screen today.
+# tier-aware end-of-conversation card in place of the transcript. The
+# `reason` field is open for future expansion (e.g. "out_of_scope") but
+# only "escalation" is emitted by the safety screen today.
 SESSION_END_TOPIC = "lk.session-end"
 
 # Audio-drain delay (seconds) between the escalation script returning
@@ -335,6 +335,39 @@ def build_triage_system_prompt(
 # so any future drift between the alias and the static prompt remains a
 # single source of truth.
 SYSTEM_PROMPT = build_triage_system_prompt([])
+
+
+@dataclass(slots=True)
+class EscalationGuard:
+    """Session-scoped idempotency guard for the two escalation paths.
+
+    Both the server-side safety screen (regex+classifier) and the
+    model-callable ``escalate`` tool can recognise a red flag on the
+    same turn. Without coordination they both run teardown — two
+    ``safety_events`` rows, two session-end signals, two
+    ``delete_room`` calls. The guard makes teardown at-most-once per
+    session.
+
+    A fresh ``EscalationGuard`` is created per :func:`entrypoint` call
+    so a long-running worker does not leak state across sessions; the
+    instance is passed to both :func:`_wire_safety_screen` and
+    :func:`_wire_model_escalate_teardown`.
+    """
+
+    fired: bool = False
+
+    def claim(self) -> bool:
+        """Atomically claim the guard.
+
+        Returns ``True`` for the first caller and ``False`` for every
+        subsequent caller in the same session. The losing caller is
+        expected to log a structured bail event and short-circuit
+        without persisting, signalling, or attempting the room delete.
+        """
+        if self.fired:
+            return False
+        self.fired = True
+        return True
 
 
 @dataclass(slots=True)
@@ -815,6 +848,26 @@ def _wire_metrics_logging(session: AgentSession[None]) -> None:
     session.on("metrics_collected", _on_metrics)
 
 
+async def _kick_off_opener(session: Any) -> None:
+    """Trigger the realtime model's scripted opener immediately on session start.
+
+    The system prompt instructs the model to open every conversation
+    with a scripted self-introduction (first-time disclaimer, returning-
+    user refresher, or prior-condition fork — see
+    :func:`build_triage_system_prompt`). Without this kick the model
+    waits for the user to speak before producing any audio, so the
+    user hears silence after joining.
+
+    Calling :meth:`AgentSession.generate_reply` with no ``user_input``
+    and no ``instructions`` produces an assistant turn driven entirely
+    by the existing system prompt — there is no second source of truth
+    for the greeting copy in this module. Barge-in still applies: if
+    the user starts speaking immediately, the realtime framework
+    interrupts the opener as it would any assistant turn.
+    """
+    await session.generate_reply()
+
+
 async def _speak_escalation_script(
     session: AgentSession[None],
     script: str,
@@ -832,14 +885,44 @@ async def _speak_escalation_script(
     screen fires; ``session.interrupt()`` cancels that in-flight
     response so the script's audio doesn't overlap.
 
+    Three things have to line up so the routing message plays in full:
+
+    1. ``session.llm.update_options(turn_detection=None)`` — disable
+       *server-side* turn detection on the realtime model. Without
+       this, livekit-agents silently downgrades
+       ``allow_interruptions=False`` (logged warning: "the
+       RealtimeModel uses a server-side turn detection,
+       allow_interruptions cannot be False"), and the OpenAI realtime
+       VAD cancels the TTS stream the moment the user vocalises.
+       Production logs showed audio_duration=0.0 / cancelled=True on
+       the script's TTS metric — the user never heard the routing
+       message. We do not re-enable turn detection: the safety hook
+       always tears the room down right after the script, so the
+       session is short-lived from this point.
+    2. ``session.say(script, allow_interruptions=False)`` — mark the
+       routing copy non-interruptible so a stray user word does not
+       cut off the message mid-sentence.
+    3. ``await SpeechHandle.wait_for_playout()`` — the default
+       ``await session.say(...)`` returns when the handle completes,
+       which counts cancellation as completion; only
+       ``wait_for_playout`` waits for the audio to actually finish.
+
     On success, an ``agent.safety.script_spoken`` info log line marks
-    the moment ``say()`` was invoked — without this, the TTS metrics
-    log line (emitted on a different logger) is the only timeline
-    anchor and is awkward to correlate.
+    the moment playout completed — without this, the TTS metrics log
+    line (emitted on a different logger) is the only timeline anchor
+    and is awkward to correlate.
 
     Best-effort: failures on either step are logged and swallowed —
     the audit-log row and session close still run.
     """
+    llm = getattr(session, "llm", None)
+    update_options = getattr(llm, "update_options", None) if llm is not None else None
+    if callable(update_options):
+        try:
+            update_options(turn_detection=None)
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            log.warning("agent.safety.disable_turn_detection_failed", error=str(exc))
+
     interrupt = getattr(session, "interrupt", None)
     if callable(interrupt):
         try:
@@ -850,7 +933,12 @@ async def _speak_escalation_script(
             log.warning("agent.safety.interrupt_failed", error=str(exc))
 
     try:
-        await session.say(script)
+        handle = session.say(script, allow_interruptions=False)
+        wait_for_playout = getattr(handle, "wait_for_playout", None)
+        if callable(wait_for_playout):
+            await wait_for_playout()
+        elif hasattr(handle, "__await__"):
+            await handle
         log.info("agent.safety.script_spoken", tier=tier)
     except Exception as exc:  # noqa: BLE001 — best-effort speak
         log.warning("agent.safety.say_failed", error=str(exc))
@@ -867,8 +955,8 @@ async def _emit_session_end_signal(
 
     Best-effort: a transport failure here is logged but does not block
     the rest of the escalation flow (the script still plays, the room
-    is still torn down). The end-of-call card is the *visual* affordance
-    for the routing message, not the routing itself.
+    is still torn down). The end-of-conversation card is the *visual*
+    affordance for the routing message, not the routing itself.
     """
     if ctx is None:
         return
@@ -931,6 +1019,7 @@ def _wire_safety_screen(
     *,
     conv_id: UUID | None = None,
     ctx: Any | None = None,
+    guard: EscalationGuard | None = None,
 ) -> None:
     """Run the regex red-flag screen on every committed user utterance.
 
@@ -982,6 +1071,14 @@ def _wire_safety_screen(
         if result.tier not in (core_safety.RedFlagTier.EMERGENT, core_safety.RedFlagTier.URGENT):
             return
 
+        if guard is not None and not guard.claim():
+            log.info(
+                "agent.safety.guard_taken",
+                tier=result.tier.value,
+                source=result.source,
+            )
+            return
+
         log.warning(
             "agent.safety.escalation",
             tier=result.tier.value,
@@ -1002,7 +1099,7 @@ def _wire_safety_screen(
         # routing message in full while still on the regular Talk
         # page; only once the script (and the audio-drain window)
         # have completed do we emit the session-end signal so the
-        # frontend can swap in the EndOfCallCard. Emitting before the
+        # frontend can swap in the EndOfConversationCard. Emitting before the
         # script caused the card to render while the audio was still
         # in flight — users saw the routing copy but never heard it.
         script = core_safety.escalation_script_for(result.tier)
@@ -1050,6 +1147,136 @@ def _wire_safety_screen(
         asyncio.create_task(_screen_and_maybe_escalate(text))
 
     session.on("conversation_item_added", _on_item)
+
+
+def _persist_safety_event_from_model(
+    *,
+    conv_id: UUID | None,
+    deps: _SessionDeps,
+    log: Any,
+    tier: str,
+) -> None:
+    """Record a model-initiated escalation in ``safety_events``.
+
+    Mirrors :func:`_persist_safety_event` but writes a row with
+    ``source="model"``, an empty ``matched_flags`` array, and an empty
+    ``utterance`` — the model's free-text ``reason`` is captured in
+    structured logs rather than overloading ``matched_flags``.
+    """
+    if conv_id is None:
+        log.warning("agent.safety.persist_skipped_no_conversation")
+        return
+    if deps.supabase_access_token is None:
+        log.warning("agent.safety.persist_skipped_no_token")
+        return
+    try:
+        core_safety_events.record(
+            conv_id,
+            deps.user.id,
+            tier,
+            "model",
+            [],
+            "",
+            supabase_token=deps.supabase_access_token,
+        )
+    except Exception as exc:  # noqa: BLE001 — persistence is best-effort
+        log.warning("agent.safety.persist_failed", error=str(exc))
+
+
+def _wire_model_escalate_teardown(
+    session: AgentSession[None],
+    deps: _SessionDeps,
+    log: Any,
+    *,
+    conv_id: UUID | None = None,
+    ctx: Any | None = None,
+    guard: EscalationGuard,
+) -> None:
+    """Run teardown when the realtime model calls ``escalate(tier=...)``.
+
+    Two listeners cooperate:
+
+    * ``speech_created`` records the most-recent assistant speech
+      handle. The realtime model emits this event for the turn that
+      contains the ``escalate`` tool call; the handle stays live
+      until ``wait_for_playout`` returns.
+    * ``function_tools_executed`` looks for a successful ``escalate``
+      call. For tiers ``emergent`` / ``urgent`` the helper awaits the
+      tracked handle's ``wait_for_playout``, then claims the
+      :class:`EscalationGuard` and runs the same teardown as the
+      safety screen (persist → emit session-end → delete room). The
+      script is *not* re-spoken by the agent worker — the model
+      already produced speech for the same turn it issued the tool
+      call, and the system prompt instructs it to mirror the script.
+
+    Tier ``clinician_soon`` is a no-op: the conversation continues so
+    the user can ask follow-up questions about scheduling care.
+    """
+
+    active_speech: dict[str, Any] = {}
+
+    def _on_speech_created(event: Any) -> None:
+        handle = getattr(event, "speech_handle", None)
+        if handle is None:
+            return
+        active_speech["handle"] = handle
+
+    async def _finalize(handle: Any, tier_value: str, reason: str) -> None:
+        if handle is not None:
+            try:
+                await handle.wait_for_playout()
+            except Exception as exc:  # noqa: BLE001 — best-effort wait
+                log.warning(
+                    "agent.safety.model_escalate.wait_failed",
+                    tier=tier_value,
+                    error=str(exc),
+                )
+
+        if not guard.claim():
+            log.info(
+                "agent.safety.model_escalate.guard_taken",
+                tier=tier_value,
+                reason=reason,
+            )
+            return
+
+        log.warning(
+            "agent.safety.escalation",
+            tier=tier_value,
+            source="model",
+            matched_flags=[],
+            reason=reason,
+            user_id=str(deps.user.id),
+            session_id=deps.session_id,
+            conversation_id=str(conv_id) if conv_id is not None else None,
+        )
+        _persist_safety_event_from_model(conv_id=conv_id, deps=deps, log=log, tier=tier_value)
+        await _emit_session_end_signal(ctx=ctx, log=log, tier=tier_value, reason="escalation")
+        if ctx is not None:
+            room = getattr(ctx, "room", None)
+            room_name = getattr(room, "name", None) if room is not None else None
+            if room_name:
+                await _delete_room_after_drain(room_name, log=log)
+
+    def _on_executed(event: FunctionToolsExecutedEvent) -> None:
+        for call, _output in event.zipped():
+            if getattr(call, "name", None) != "escalate":
+                continue
+            try:
+                args = json.loads(call.arguments) if call.arguments else {}
+            except json.JSONDecodeError:
+                args = {}
+            tier_value = args.get("tier") if isinstance(args, dict) else None
+            reason = args.get("reason", "") if isinstance(args, dict) else ""
+            if tier_value not in {"emergent", "urgent"}:
+                continue
+            handle = active_speech.get("handle")
+            import asyncio
+
+            asyncio.create_task(_finalize(handle, str(tier_value), str(reason)))
+
+    session.on("speech_created", _on_speech_created)
+    session.on("function_tools_executed", _on_executed)
 
 
 def _persist_safety_event(
@@ -1188,7 +1415,14 @@ async def entrypoint(ctx: JobContext) -> None:
         deps=deps,
     )
     _wire_metrics_logging(session)
-    _wire_safety_screen(session, deps, log, conv_id=conv_id, ctx=ctx)
+    # The same EscalationGuard instance is shared between the safety
+    # screen and the model-initiated escalate hook so a same-turn race
+    # between the two paths produces only one teardown.
+    escalation_guard = EscalationGuard()
+    _wire_safety_screen(session, deps, log, conv_id=conv_id, ctx=ctx, guard=escalation_guard)
+    _wire_model_escalate_teardown(
+        session, deps, log, conv_id=conv_id, ctx=ctx, guard=escalation_guard
+    )
     if conv_id is not None:
         _wire_conversation_persistence(
             session,
@@ -1215,6 +1449,11 @@ async def entrypoint(ctx: JobContext) -> None:
 
     try:
         await session.start(agent, room=ctx.room)
+        # Trigger Sarjy's scripted opener immediately so the user hears
+        # the self-introduction / refresher within the natural startup
+        # window instead of silence. Variant selection lives in the
+        # system prompt; see :func:`_kick_off_opener`.
+        await _kick_off_opener(session)
     finally:
         if conv_id is not None and supabase_token is not None:
             try:

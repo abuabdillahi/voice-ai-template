@@ -35,9 +35,11 @@ class SafetyEvent:
 
     The ``tier`` and ``source`` fields are constrained at the database
     by ``CHECK`` clauses; the dataclass mirrors the on-disk values
-    rather than re-enumerating them in Python. Bumping the allowed
-    values is a coordinated migration plus an enum extension in
-    :mod:`core.safety`.
+    rather than re-enumerating them in Python. Allowed ``source``
+    values today are ``regex``, ``classifier``, ``both``, and
+    ``model`` (see ``0006_safety_events_model_source.sql``). Bumping
+    the allowed values is a coordinated migration plus an enum
+    extension in :mod:`core.safety`.
     """
 
     id: UUID

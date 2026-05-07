@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { EndOfCallCard } from '@/components/end-of-call-card';
+import { EndOfConversationCard } from '@/components/end-of-conversation-card';
 import { TriageSlots } from '@/components/triage-slots';
 import { cn } from '@/lib/utils';
 
@@ -47,8 +47,8 @@ export function TalkPage() {
   const sessionEndSignal = useSessionEndSignal(room);
 
   // The agent emits the session-end signal *before* speaking the
-  // escalation script — that is by design, so the EndOfCallCard can
-  // render while the audio is still arriving. We deliberately do not
+  // escalation script — that is by design, so the EndOfConversationCard
+  // can render while the audio is still arriving. We deliberately do not
   // call `room.disconnect()` ourselves here: the authoritative
   // teardown is the server-side `room.delete` (issued after the
   // script finishes plus a ~500 ms drain in
@@ -156,8 +156,8 @@ export function TalkPage() {
   const isConnecting = status === 'connecting' || connectMutation.isPending;
 
   // Once a session-end signal has been received, the talk page is no
-  // longer a talk page — it's an end-of-call screen. Render only the
-  // routing card, with no Connect / Disconnect / Mic affordances.
+  // longer a talk page — it's an end-of-conversation screen. Render only
+  // the routing card, with no Connect / Disconnect / Mic affordances.
   // Per issue 05's AC: "no Reconnect / Try-again affordance anywhere
   // ... when the end-card is showing." The page chrome (Sign out /
   // History links) lives in the parent route, so the user can still
@@ -165,7 +165,7 @@ export function TalkPage() {
   if (sessionEndSignal) {
     return (
       <div className="flex w-full max-w-3xl flex-col gap-4">
-        <EndOfCallCard signal={sessionEndSignal} />
+        <EndOfConversationCard signal={sessionEndSignal} />
       </div>
     );
   }

@@ -5,7 +5,7 @@ import { type Room } from 'livekit-client';
  * The data-channel topic the agent uses to signal session-end. Mirrors
  * the `SESSION_END_TOPIC` constant in `agent.session` on the Python
  * side. Distinct from `lk.tool-calls` and `lk.triage-state` so the end-
- * of-call card does not have to filter a multi-purpose stream.
+ * of-conversation card does not have to filter a multi-purpose stream.
  */
 const SESSION_END_TOPIC = 'lk.session-end';
 
@@ -80,12 +80,12 @@ export function useSessionEndSignal(room: Room | null): SessionEndSignal | null 
 
     // Deliberately *no* `RoomEvent.Disconnected` listener here. The
     // session-end signal exists precisely to inform the UI that the
-    // call is ending — the disconnect that follows (server-side room
-    // delete plus our own 500ms-drain disconnect) is the natural
+    // conversation is ending — the disconnect that follows (server-side
+    // room delete plus our own 500ms-drain disconnect) is the natural
     // completion of that flow, not a reason to forget what happened.
     // Prior implementation reset the signal on Disconnected and made
-    // the EndOfCallCard flash for ~500ms before the regular Talk page
-    // came back, which defeats the whole feature.
+    // the EndOfConversationCard flash for ~500ms before the regular Talk
+    // page came back, which defeats the whole feature.
 
     return () => {
       r.unregisterTextStreamHandler?.(SESSION_END_TOPIC);

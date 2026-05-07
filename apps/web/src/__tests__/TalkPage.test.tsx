@@ -139,7 +139,7 @@ describe('TalkPage', () => {
     expect(connectMock).not.toHaveBeenCalled();
   });
 
-  it('replaces the transcript with the end-of-call card when a session-end signal arrives', async () => {
+  it('replaces the transcript with the end-of-conversation card when a session-end signal arrives', async () => {
     apiFetchMock.mockResolvedValue({
       token: 'lk-jwt-token',
       url: 'wss://test.livekit.cloud',
@@ -168,7 +168,7 @@ describe('TalkPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/call your local emergency number now/i)).toBeInTheDocument();
     });
-    // No Reconnect / Try-again button while the end-of-call card is showing.
+    // No Reconnect / Try-again button while the end-of-conversation card is showing.
     expect(screen.queryByRole('button', { name: /reconnect|try again/i })).toBeNull();
     // No Connect / Disconnect / Mic affordances either — per the AC,
     // there must be no way to nudge the user back into the voice loop
