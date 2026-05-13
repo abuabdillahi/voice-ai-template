@@ -1,8 +1,8 @@
-# Sarjy
+# limber
 
-Voice-first triage assistant for office-strain symptoms — wrist tingling, eye strain, tension headaches, neck strain, lumbar pain. The user clicks Connect, talks, and Sarjy walks them through an OPQRST-style symptom interview. The session ends in one of three ways: a self-care routine, a clinician referral surfaced via OpenStreetMap, or — rarely — an emergent/urgent routing message.
+Voice-first triage product for office-strain symptoms — wrist tingling, eye strain, tension headaches, neck strain, lumbar pain. The user clicks Connect, talks, and Brook (the voice agent) walks them through an OPQRST-style symptom interview. The session ends in one of three ways: a self-care routine, a clinician referral surfaced via OpenStreetMap, or — rarely — an emergent/urgent routing message.
 
-Sarjy is **explicitly not a doctor**. The product layer enforces a deliberately narrow scope (five conditions, defined in [`packages/core/core/conditions.py`](./packages/core/core/conditions.py)) and routes anything outside that scope away.
+limber is **explicitly not a doctor**. The product layer enforces a deliberately narrow scope (five conditions, defined in [`packages/core/core/conditions.py`](./packages/core/core/conditions.py)) and routes anything outside that scope away.
 
 The runtime stack is real-time conversational voice via LiveKit Agents on top of OpenAI's `gpt-realtime` speech-to-speech model. The backend is FastAPI + Supabase; the frontend is Vite + React + TanStack Router with shadcn/ui.
 
@@ -78,7 +78,7 @@ cp .env.example .env
 docker compose up
 
 # In a separate terminal:
-pnpm --filter @sarjy/web dev
+pnpm --filter @limber/web dev
 ```
 
 For a production-shaped stack (api + agent + nginx-served web bundle):
@@ -93,7 +93,7 @@ LiveKit itself is **not** in the compose stack — both dev and prod dial a host
 
 ### Supabase (auth + Postgres)
 
-Sarjy uses Supabase for auth, Postgres, and Row-Level Security. Two flavours are supported:
+limber uses Supabase for auth, Postgres, and Row-Level Security. Two flavours are supported:
 
 #### Option A — Supabase Cloud (zero-setup, free tier)
 
@@ -135,7 +135,7 @@ LiveKit owns signalling + RTP. Both dev and prod dial a hosted LiveKit Cloud pro
 
 ### OpenAI (realtime model + safety TTS + classifier)
 
-Sarjy uses three OpenAI surfaces: `gpt-realtime` for the conversation, `gpt-4o-mini-tts` for the safety-script playback, and `gpt-4o-mini` for the classifier half of the red-flag screen.
+limber uses three OpenAI surfaces: `gpt-realtime` for the conversation, `gpt-4o-mini-tts` for the safety-script playback, and `gpt-4o-mini` for the classifier half of the red-flag screen.
 
 1. Create an account at <https://platform.openai.com> and provision an API key with access to the realtime model family.
 2. Paste it into `.env`:
@@ -167,7 +167,7 @@ The token reaches the agent through two channels:
 
 The agent prefers the live attribute when present and falls back to the metadata claim.
 
-**Security note.** LiveKit metadata is decodable by anyone holding the LiveKit access token. For Sarjy this is acceptable — the same client (the signed-in user's browser) already holds the Supabase JWT in `localStorage`, so embedding it in the LiveKit token does not widen its exposure. Deployments with shared rooms or third-party agent participants should route the JWT through a server-side relay instead.
+**Security note.** LiveKit metadata is decodable by anyone holding the LiveKit access token. For limber this is acceptable — the same client (the signed-in user's browser) already holds the Supabase JWT in `localStorage`, so embedding it in the LiveKit token does not widen its exposure. Deployments with shared rooms or third-party agent participants should route the JWT through a server-side relay instead.
 
 ## Observability
 
@@ -205,10 +205,10 @@ The frontend's `src/api/types.gen.ts` is generated from the FastAPI OpenAPI sche
 
 ```sh
 # In one terminal, with .env populated:
-pnpm --filter @sarjy/api dev
+pnpm --filter @limber/api dev
 
 # In another:
-pnpm --filter @sarjy/web gen:api
+pnpm --filter @limber/web gen:api
 ```
 
 The script reads `apps/api/openapi.json` (committed for offline builds) and writes `apps/web/src/api/types.gen.ts`.

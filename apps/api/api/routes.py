@@ -141,7 +141,7 @@ def livekit_token(
 
 
 class PriorSessionStatusResponse(BaseModel):
-    """Whether the user has spoken to Sarjy before.
+    """Whether the user has spoken to Brook before.
 
     The frontend pre-connect surface pairs this signal with the safety
     card: first-time visitors see the full amber disclaimer permanently,

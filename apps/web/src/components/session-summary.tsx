@@ -64,7 +64,7 @@ export function SessionSummary({
             aria-label="Clinicians suggested in this session"
             className="flex flex-col gap-3 rounded-[calc(var(--radius))] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 sm:p-5"
           >
-            <div className="sarjy-eyebrow">Clinicians suggested in this session</div>
+            <div className="limber-eyebrow">Clinicians suggested in this session</div>
             {clinicianResults.map((entry) => (
               <ClinicianSuggestions key={entry.id} result={entry.result ?? null} />
             ))}
@@ -93,7 +93,7 @@ export function SessionSummary({
 
 // ---- session-storage stash --------------------------------------------------
 
-const STASH_KEY = 'sarjy.session-summary.v1';
+const STASH_KEY = 'limber.session-summary.v1';
 
 export interface SessionSummaryStash {
   signal: SessionEndSignal;
@@ -104,7 +104,7 @@ export interface SessionSummaryStash {
 /**
  * Persist a summary payload across the route boundary. The
  * `/session-end` route lives at its own URL so the AppHeader's
- * Sarjy → home navigation actually leaves the summary; that means
+ * limber-mark → home navigation actually leaves the summary; that means
  * the summary state has to survive the route change. sessionStorage
  * scopes to the tab and clears when the user closes it, which is the
  * lifetime we want for an in-flight summary.

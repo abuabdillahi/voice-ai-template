@@ -27,7 +27,7 @@ interface Snapshot {
  *     it, then sets `room = null`; by the time this effect runs the
  *     WebRTC teardown is complete.
  *
- * Routing through a real URL lets the AppHeader's Sarjy → home link
+ * Routing through a real URL lets the AppHeader's limber-mark → home link
  * actually leave the summary instead of resetting same-page state.
  *
  * The snapshot is necessary because `useLivekitTranscript` and

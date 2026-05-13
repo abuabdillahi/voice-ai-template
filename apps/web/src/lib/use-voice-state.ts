@@ -43,7 +43,7 @@ export function useVoiceState(
   // resets on disconnect / fresh connect. Used to discriminate the
   // brief connecting → first-greeting window from the regular
   // listening state — we don't want the connection bar to read "I'm
-  // listening, take your time" before Sarjy has even said hello,
+  // listening, take your time" before Brook has even said hello,
   // because it tempts users to talk over the opener.
   const [agentHasSpoken, setAgentHasSpoken] = useState(false);
 

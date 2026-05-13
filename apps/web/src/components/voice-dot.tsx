@@ -3,13 +3,13 @@ export type VoiceState = 'idle' | 'connecting' | 'listening' | 'thinking' | 'spe
 const STATE_COPY: Record<VoiceState, { primary: string; sub: string }> = {
   idle: { primary: 'Ready.', sub: 'Press Start to begin.' },
   // `connecting` covers the window between the room being established
-  // and Sarjy delivering its opening turn. The copy must not invite
-  // the user to speak: Sarjy is the one who initiates, and a "I'm
+  // and Brook delivering its opening turn. The copy must not invite
+  // the user to speak: Brook is the one who initiates, and a "I'm
   // listening" prompt at this moment leads users to start talking
   // over a greeting that hasn't arrived yet. The phrasing is
   // deliberately indirect — describes what's happening rather than
   // instructing the user to wait.
-  connecting: { primary: 'Just a moment…', sub: 'Sarjy will be with you shortly.' },
+  connecting: { primary: 'Just a moment…', sub: 'Brook will be with you shortly.' },
   listening: { primary: "I'm listening.", sub: 'Take your time.' },
   thinking: { primary: 'Thinking…', sub: 'Pulling that together.' },
   speaking: { primary: "I'm speaking.", sub: 'Speak up to jump in.' },
@@ -51,22 +51,22 @@ export function VoiceDot({ state, size = 64 }: VoiceDotProps) {
       {showRing ? (
         <span
           aria-hidden
-          className="sarjy-voice-ring absolute inset-0 rounded-full"
+          className="limber-voice-ring absolute inset-0 rounded-full"
           style={{
             border: `1.5px solid ${color}`,
-            animation: 'sarjy-pulse-ring 2.2s ease-out infinite',
+            animation: 'limber-pulse-ring 2.2s ease-out infinite',
           }}
         />
       ) : null}
       <span
         aria-hidden
-        className="sarjy-voice-dot rounded-full"
+        className="limber-voice-dot rounded-full"
         style={{
           width: size * 0.42,
           height: size * 0.42,
           background: color,
           boxShadow: state === 'muted' ? 'none' : `0 0 ${size * 0.45}px hsl(${colorVar} / 0.33)`,
-          animation: breathing ? 'sarjy-breathe 3.2s ease-in-out infinite' : 'none',
+          animation: breathing ? 'limber-breathe 3.2s ease-in-out infinite' : 'none',
           transition: 'background 200ms',
         }}
       />
@@ -75,11 +75,11 @@ export function VoiceDot({ state, size = 64 }: VoiceDotProps) {
           {[0, 1, 2].map((i) => (
             <span
               key={i}
-              className="sarjy-thinking-dot rounded-full bg-white"
+              className="limber-thinking-dot rounded-full bg-white"
               style={{
                 width: 5,
                 height: 5,
-                animation: `sarjy-thinking 1.2s ease-in-out ${i * 0.16}s infinite`,
+                animation: `limber-thinking 1.2s ease-in-out ${i * 0.16}s infinite`,
               }}
             />
           ))}

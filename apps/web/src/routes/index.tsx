@@ -1,7 +1,7 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 
 import { supabase } from '@/lib/supabase';
-import { SarjyHome } from '@/components/sarjy-home';
+import { LimberHome } from '@/components/home';
 
 export const Route = createFileRoute('/')({
   beforeLoad: async () => {
@@ -10,5 +10,5 @@ export const Route = createFileRoute('/')({
       throw redirect({ to: '/sign-in' });
     }
   },
-  component: SarjyHome,
+  component: LimberHome,
 });

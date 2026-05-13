@@ -35,8 +35,8 @@ import {
   DisclaimerBanner,
   IN_SCOPE_CONDITIONS,
   ScopeStatement,
-  SarjyHome,
-} from '@/components/sarjy-home';
+  LimberHome,
+} from '@/components/home';
 
 function renderWithProviders(ui: React.ReactElement) {
   const client = new QueryClient({
@@ -45,17 +45,16 @@ function renderWithProviders(ui: React.ReactElement) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
-describe('SarjyHome', () => {
-  it('renders the Sarjy wordmark in the app header', () => {
-    renderWithProviders(<SarjyHome />);
-    // The wordmark is the "Sarjy" text adjacent to the equalizer logo
-    // SVG in the AppHeader. The redesign drops the standalone <h1>
-    // because the wordmark is brand-mark-shaped.
-    expect(screen.getAllByLabelText(/sarjy/i).length).toBeGreaterThan(0);
+describe('LimberHome', () => {
+  it('renders the limber wordmark in the app header', () => {
+    renderWithProviders(<LimberHome />);
+    // The wordmark is the lowercase "limber." word with its orange
+    // period — read as an aria-labelled span by assistive tech.
+    expect(screen.getAllByLabelText(/limber/i).length).toBeGreaterThan(0);
   });
 
   it('exposes Talk and History navigation', () => {
-    renderWithProviders(<SarjyHome />);
+    renderWithProviders(<LimberHome />);
     // The router's <Link> mock renders an `<a>` without `href`, which
     // strips the implicit `link` role per the ARIA spec — assert via
     // visible text instead so the test is robust to that mock detail.
@@ -64,12 +63,12 @@ describe('SarjyHome', () => {
   });
 
   it('exposes a sign-out affordance in the header', () => {
-    renderWithProviders(<SarjyHome />);
+    renderWithProviders(<LimberHome />);
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
   });
 
   it('renders the talk-page slot (start-talking affordance)', () => {
-    renderWithProviders(<SarjyHome />);
+    renderWithProviders(<LimberHome />);
     expect(screen.getByRole('button', { name: /start talking/i })).toBeInTheDocument();
   });
 });

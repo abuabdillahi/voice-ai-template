@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 
 export type ThemeChoice = 'light' | 'dark' | 'system';
 
-const STORAGE_KEY = 'sarjy.theme';
-const EVENT = 'sarjy:theme';
+const STORAGE_KEY = 'limber.theme';
+const EVENT = 'limber:theme';
 
 export function readStoredTheme(): ThemeChoice {
   try {

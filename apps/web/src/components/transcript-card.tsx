@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useRef } from 'react';
 
 import { ClinicianSuggestions } from '@/components/clinician-suggestions';
-import { SarjyLogo } from '@/components/sarjy-logo';
+import { BrookAvatar } from '@/components/brand';
 import type { TranscriptEntry } from '@/lib/livekit-transcript';
 import { cn } from '@/lib/utils';
 
@@ -36,7 +36,7 @@ export type TranscriptItem =
 interface TranscriptCardProps {
   items: TranscriptItem[];
   /** Whether the agent is currently producing audio. Drives the
-   *  "Sarjy is speaking…" typing bubble independently of mute state. */
+   *  "Brook is speaking…" typing bubble independently of mute state. */
   agentSpeaking?: boolean;
   /** Frozen mode hides the live indicator and disables auto-scroll. */
   frozen?: boolean;
@@ -109,7 +109,7 @@ export function TranscriptCard({
             <UtteranceBubble key={item.id} item={item} />
           ),
         )}
-        {!frozen && agentSpeaking ? <TypingLine label="Sarjy is speaking…" /> : null}
+        {!frozen && agentSpeaking ? <TypingLine label="Brook is speaking…" /> : null}
       </ul>
     </section>
   );
@@ -126,26 +126,22 @@ function UtteranceBubble({ item }: UtteranceProps) {
       data-role={item.role}
       className={cn('flex items-start gap-2.5', isUser && 'flex-row-reverse')}
     >
-      <div
-        aria-hidden
-        className={cn(
-          'flex h-7 w-7 flex-none items-center justify-center rounded-full text-[11px] font-semibold',
-          isUser
-            ? 'bg-[hsl(var(--user-bubble))] text-[hsl(var(--user-bubble-fg))]'
-            : 'bg-[hsl(var(--primary-soft))] text-[hsl(var(--primary-soft-fg))]',
-        )}
-      >
-        {isUser ? 'You' : <SarjyLogo size={16} />}
-      </div>
+      {isUser ? (
+        <div
+          aria-hidden
+          className="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-[hsl(var(--user-bubble))] text-[11px] font-semibold text-[hsl(var(--user-bubble-fg))]"
+        >
+          You
+        </div>
+      ) : (
+        <BrookAvatar size={28} />
+      )}
       <div
         className={cn(
           'max-w-[78%] rounded-[14px] px-3.5 py-2.5 text-[14.5px] leading-snug',
-          // The design hardcodes white user-bubble copy regardless of
-          // mode — `--primary-foreground` flips dark in dark mode and
-          // would make user text illegible on the teal bubble.
           isUser
-            ? 'rounded-br-[4px] bg-[hsl(var(--primary))] text-white'
-            : 'rounded-bl-[4px] bg-[hsl(var(--muted))] text-[hsl(var(--foreground))]',
+            ? 'rounded-br-[4px] bg-[hsl(var(--user-bubble))] text-[hsl(var(--user-bubble-fg))]'
+            : 'rounded-bl-[4px] bg-[hsl(var(--secondary))] text-[hsl(var(--foreground))]',
         )}
       >
         <p className="whitespace-pre-wrap">{item.text}</p>
@@ -153,7 +149,9 @@ function UtteranceBubble({ item }: UtteranceProps) {
           <time
             className={cn(
               'mt-1 block font-mono text-[10.5px]',
-              isUser ? 'text-white/70' : 'text-[hsl(var(--muted-foreground))]',
+              isUser
+                ? 'text-[hsl(var(--user-bubble-fg)/0.6)]'
+                : 'text-[hsl(var(--muted-foreground))]',
             )}
           >
             {formatClockTime(item.timestamp)}
@@ -216,15 +214,13 @@ function ToolCallChip({ item }: ToolCallProps) {
 function TypingLine({ label }: { label: string }) {
   return (
     <li className="flex items-center gap-2.5" data-role="typing">
-      <div className="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-[hsl(var(--primary-soft))] text-[hsl(var(--primary-soft-fg))]">
-        <SarjyLogo size={16} />
-      </div>
-      <div className="flex items-center gap-1.5 rounded-[14px] rounded-bl-[4px] bg-[hsl(var(--muted))] px-3.5 py-2.5">
+      <BrookAvatar size={28} />
+      <div className="flex items-center gap-1.5 rounded-[14px] rounded-bl-[4px] bg-[hsl(var(--secondary))] px-3.5 py-2.5">
         {[0, 1, 2].map((i) => (
           <span
             key={i}
             className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--primary))]"
-            style={{ animation: `sarjy-thinking 1.2s ease-in-out ${i * 0.15}s infinite` }}
+            style={{ animation: `limber-thinking 1.2s ease-in-out ${i * 0.15}s infinite` }}
           />
         ))}
         <span className="ml-1.5 text-xs text-[hsl(var(--muted-foreground))]">{label}</span>

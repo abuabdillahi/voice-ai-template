@@ -18,17 +18,13 @@ export const IN_SCOPE_CONDITIONS = [
 ];
 
 /**
- * Sarjy home page body. Extracted from the route file so the test
- * suite can render it without mocking out `@tanstack/react-router`'s
- * `createFileRoute`.
- *
- * Layout: an app-wide header with Talk/History nav and sign-out, then
- * the talk surface. The pre-connect mode of the talk surface owns the
- * disclaimer and scope panels, so they live next to the "Start
- * talking" CTA where the user is making the decision instead of as
- * walls of text above an unrelated card.
+ * limber home page body. Renders the app-wide header with Talk/History
+ * nav and the talk surface beneath. The pre-connect mode of the talk
+ * surface owns limber's marketing hero, the Brook "Meet your assistant"
+ * card, and the safety disclaimer so the safety surface sits where the
+ * user is making the decision instead of as a wall of text.
  */
-export function SarjyHome() {
+export function LimberHome() {
   return (
     <div className="flex min-h-screen flex-col">
       <AppHeader active="talk" />
@@ -50,11 +46,13 @@ export function DisclaimerBanner() {
     <section
       role="region"
       aria-label="Educational tool disclaimer"
-      className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+      className="rounded-md border border-[hsl(var(--amber-soft-border))] bg-[hsl(var(--amber-soft))] px-4 py-3 text-sm text-[hsl(var(--amber-soft-body))]"
     >
-      <p className="font-semibold">This is an educational tool, not a doctor.</p>
+      <p className="font-semibold text-[hsl(var(--amber-soft-fg-strong))]">
+        I&apos;m an educational tool, not a doctor.
+      </p>
       <p className="mt-1">
-        Sarjy helps you think about office-strain symptoms and what to try first. It is not a
+        limber helps you think about office-strain symptoms and what to try first. It is not a
         substitute for professional medical advice. If something feels urgent, call your local
         emergency number or go to urgent care.
       </p>

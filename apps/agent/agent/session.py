@@ -139,13 +139,13 @@ _ENGLISH_ONLY_RULE = (
     "non-English language, restate the constraint and stop progressing "
     "the OPQRST interview until they switch to English."
 )
-_SARJY_SELF_INTRO_RULE = (
-    'Open every session with the literal phrase "Hi, I\'m Sarjy." '
+_BROOK_SELF_INTRO_RULE = (
+    'Open every session with the literal phrase "Hi, I\'m Brook." '
     "immediately before the educational-tool disclaimer. Do not vary "
     "the wording of the self-introduction."
 )
-_SARJY_RETURNING_OPENER_RULE = (
-    'Open every session with the literal phrase "Hi, Sarjy here. '
+_BROOK_RETURNING_OPENER_RULE = (
+    'Open every session with the literal phrase "Hi, Brook here. '
     "Quick reminder I'm still an educational tool, not a doctor.\" "
     "before any prior-condition fork or the OPQRST opener. Do not "
     "re-read the full educational-tool disclaimer; the on-screen "
@@ -235,10 +235,10 @@ def _build_static_triage_prompt(
         "outside the five listed above"
     )
     if is_returning_user:
-        opener_rule = _SARJY_RETURNING_OPENER_RULE
+        opener_rule = _BROOK_RETURNING_OPENER_RULE
         disclaimer_block = ""
     else:
-        opener_rule = _SARJY_SELF_INTRO_RULE
+        opener_rule = _BROOK_SELF_INTRO_RULE
         disclaimer_block = (
             "Open every new conversation with this disclaimer in your own words: "
             "explain that you are an educational tool, not a doctor, and not a "
@@ -337,7 +337,7 @@ def build_triage_system_prompt(
     Branches:
 
     - ``is_returning_user=False`` and ``prior_sessions=[]`` → first-time
-      user. Rendered string includes the Sarjy self-introduction rule
+      user. Rendered string includes the Brook self-introduction rule
       and the full educational-tool disclaimer instruction. This is the
       new regression anchor for first-time users.
     - ``is_returning_user=True`` and ``prior_sessions=[]`` → returning
@@ -1303,7 +1303,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     try:
         await session.start(agent, room=ctx.room)
-        # Trigger Sarjy's scripted opener immediately so the user hears
+        # Trigger Brook's scripted opener immediately so the user hears
         # the self-introduction / refresher within the natural startup
         # window instead of silence. Variant selection lives in the
         # system prompt; see :func:`_kick_off_opener`.

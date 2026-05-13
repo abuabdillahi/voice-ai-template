@@ -214,7 +214,7 @@ def test_build_triage_system_prompt_handles_null_recall() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Sarjy rebrand — agent self-introduction in opening turn
+# Brook persona — agent self-introduction in opening turn
 # ---------------------------------------------------------------------------
 
 
@@ -240,12 +240,12 @@ def test_static_prompt_contains_english_only_rule_in_every_branch() -> None:
 def test_returning_user_no_priors_uses_short_refresher() -> None:
     """``(True, [])`` swaps the full disclaimer for the short refresher.
 
-    The short opener is byte-for-byte: ``Hi, Sarjy here. Quick reminder
+    The short opener is byte-for-byte: ``Hi, Brook here. Quick reminder
     I'm still an educational tool, not a doctor.`` and the static
     "Open every new conversation with this disclaimer" instruction is
     no longer present in this branch.
     """
-    short_opener = "Hi, Sarjy here. Quick reminder I'm still an educational tool, not a doctor."
+    short_opener = "Hi, Brook here. Quick reminder I'm still an educational tool, not a doctor."
     full_disclaimer_instruction = (
         "Open every new conversation with this disclaimer in your own words"
     )
@@ -271,7 +271,7 @@ def test_returning_user_with_priors_composes_refresher_and_recall_block() -> Non
     prior = _prior("carpal_tunnel", recall="User reported wrist tingling.")
     prompt = build_triage_system_prompt([prior], is_returning_user=True)
 
-    short_opener = "Hi, Sarjy here. Quick reminder I'm still an educational tool, not a doctor."
+    short_opener = "Hi, Brook here. Quick reminder I'm still an educational tool, not a doctor."
     assert short_opener in prompt
     assert "Most recent session" in prompt
     assert "carpal_tunnel" in prompt
@@ -293,8 +293,8 @@ def test_returning_user_branches_keep_english_only_and_numbers_rules() -> None:
         assert _TRIAGE_NUMBERS_RULE in prompt
 
 
-def test_static_prompt_instructs_sarjy_self_introduction() -> None:
-    """First-time users hear ``Hi, I'm Sarjy.`` immediately before the disclaimer.
+def test_static_prompt_instructs_brook_self_introduction() -> None:
+    """First-time users hear ``Hi, I'm Brook.`` immediately before the disclaimer.
 
     The phrasing is fixed in the prompt rather than left to the model
     so the test suite can assert it verbatim. The rule lives in the
@@ -302,11 +302,11 @@ def test_static_prompt_instructs_sarjy_self_introduction() -> None:
     every render — first-time, returning, with-priors, without-priors.
     """
     empty_prompt = build_triage_system_prompt([])
-    assert "Hi, I'm Sarjy." in empty_prompt
+    assert "Hi, I'm Brook." in empty_prompt
     assert "before the educational-tool disclaimer" in empty_prompt
 
     populated = build_triage_system_prompt([_prior("carpal_tunnel", recall="recall blob")])
-    assert "Hi, I'm Sarjy." in populated
+    assert "Hi, I'm Brook." in populated
 
 
 # ---------------------------------------------------------------------------

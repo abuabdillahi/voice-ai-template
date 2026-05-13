@@ -145,7 +145,7 @@ export function HistoryList() {
       ) : (
         filteredGroups.map((g) => (
           <section key={g.group} className="flex flex-col gap-2">
-            <div className="sarjy-eyebrow">{g.group}</div>
+            <div className="limber-eyebrow">{g.group}</div>
             <ul className="flex flex-col gap-2">
               {g.items.map((item) => (
                 <li key={item.id}>

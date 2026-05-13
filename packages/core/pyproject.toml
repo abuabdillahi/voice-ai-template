@@ -1,7 +1,7 @@
 [project]
 name = "core"
 version = "0.0.0"
-description = "Shared domain logic for Sarjy"
+description = "Shared domain logic for limber"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115",

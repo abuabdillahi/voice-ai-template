@@ -623,7 +623,7 @@
           "is_returning_user"
         ],
         "title": "PriorSessionStatusResponse",
-        "description": "Whether the user has spoken to Sarjy before.\n\nThe frontend pre-connect surface pairs this signal with the safety\ncard: first-time visitors see the full amber disclaimer permanently,\nreturning users see the collapsed pill. The same predicate\n(:func:`core.conversations.has_prior_session`) is what the agent\nconsults to choose between the long opener and the short refresher,\nso the visual treatment stays in lockstep with what the agent says."
+        "description": "Whether the user has spoken to Brook before.\n\nThe frontend pre-connect surface pairs this signal with the safety\ncard: first-time visitors see the full amber disclaimer permanently,\nreturning users see the collapsed pill. The same predicate\n(:func:`core.conversations.has_prior_session`) is what the agent\nconsults to choose between the long opener and the short refresher,\nso the visual treatment stays in lockstep with what the agent says."
       },
       "ValidationError": {
         "properties": {

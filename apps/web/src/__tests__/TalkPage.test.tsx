@@ -277,7 +277,7 @@ describe('TalkPage', () => {
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith({ to: '/session-end' });
     });
-    const stash = sessionStorage.getItem('sarjy.session-summary.v1');
+    const stash = sessionStorage.getItem('limber.session-summary.v1');
     expect(stash).toBeTruthy();
     const parsed = JSON.parse(stash!) as { signal: { reason: string; tier?: string } };
     expect(parsed.signal.reason).toBe('escalation');
@@ -316,7 +316,7 @@ describe('TalkPage', () => {
     });
     // The talk page navigates to the dedicated summary route once the
     // WebRTC teardown completes. Living at its own URL means the
-    // AppHeader's Sarjy → home link from the summary actually leaves
+    // AppHeader's limber-mark → home link from the summary actually leaves
     // the surface instead of reverting same-page state.
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith({ to: '/session-end' });
@@ -324,7 +324,7 @@ describe('TalkPage', () => {
     // The summary payload travels via sessionStorage so /session-end
     // can render the frozen view without re-mounting the LiveKit
     // session.
-    const stash = sessionStorage.getItem('sarjy.session-summary.v1');
+    const stash = sessionStorage.getItem('limber.session-summary.v1');
     expect(stash).toBeTruthy();
     const parsed = JSON.parse(stash!) as { signal: { reason: string } };
     expect(parsed.signal.reason).toBe('user_ended');

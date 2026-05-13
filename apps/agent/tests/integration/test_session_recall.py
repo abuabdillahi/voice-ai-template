@@ -76,6 +76,6 @@ def test_returning_user_short_refresher_threads_to_agent_instructions() -> None:
     instructions = build_triage_system_prompt([], is_returning_user=True)
     agent = build_agent(instructions=instructions)
     assert (
-        "Hi, Sarjy here. Quick reminder I'm still an educational tool, not a doctor."
+        "Hi, Brook here. Quick reminder I'm still an educational tool, not a doctor."
         in agent.instructions
     )

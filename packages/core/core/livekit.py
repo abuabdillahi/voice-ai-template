@@ -20,7 +20,7 @@ metadata at session start and forwards the token to RLS-scoped
 ``core`` operations so per-user database writes succeed.
 
 Security note: LiveKit metadata is visible to the participant client
-that holds the LiveKit token. That is acceptable for Sarjy because the
+that holds the LiveKit token. That is acceptable for limber because the
 same client already holds the Supabase JWT in its session storage —
 embedding it in the LiveKit token does not widen its exposure.
 Deployments with shared rooms or third-party agent participants should

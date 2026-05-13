@@ -14,7 +14,7 @@ import {
  * once the WebRTC teardown completes (either a user-driven End session
  * or the server-driven `room.delete` after an escalation script
  * finishes), passing the snapshot through sessionStorage. Living at a
- * stable URL means the AppHeader's Sarjy-mark → `/` navigation is a
+ * stable URL means the AppHeader's limber-mark → `/` navigation is a
  * real route change rather than a state reset on the same page.
  *
  * If the user lands here without a stash (deep link, browser refresh,

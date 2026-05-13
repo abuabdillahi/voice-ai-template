@@ -313,7 +313,7 @@ export interface components {
         };
         /**
          * PriorSessionStatusResponse
-         * @description Whether the user has spoken to Sarjy before.
+         * @description Whether the user has spoken to Brook before.
          *
          *     The frontend pre-connect surface pairs this signal with the safety
          *     card: first-time visitors see the full amber disclaimer permanently,

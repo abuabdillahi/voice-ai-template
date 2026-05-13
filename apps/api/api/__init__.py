@@ -1,1 +1,1 @@
-"""FastAPI HTTP backend for Sarjy."""
+"""FastAPI HTTP backend for limber."""

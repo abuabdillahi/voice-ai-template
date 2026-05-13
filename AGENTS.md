@@ -4,7 +4,7 @@ This file orients agentic tools (Claude Code, Cursor, etc.) working in this repo
 
 ## Project
 
-Sarjy is a voice-first triage assistant for office-strain symptoms (carpal tunnel, computer vision syndrome, tension-type headache, upper trapezius strain, lumbar strain). The runtime stack is real-time conversational voice via LiveKit Agents on top of OpenAI's `gpt-realtime` speech-to-speech model. The original product spec — written when Sarjy was a slice of a larger voice-AI template — lives at `.scratch/sarjy/PRD.md` and remains the source of truth for product decisions.
+limber is a voice-first triage product for office-strain symptoms (carpal tunnel, computer vision syndrome, tension-type headache, upper trapezius strain, lumbar strain). The voice agent's persona is **Brook**. The runtime stack is real-time conversational voice via LiveKit Agents on top of OpenAI's `gpt-realtime` speech-to-speech model. The original product spec — written when the project was a slice of a larger voice-AI template, under the working name "Sarjy" — lives at `.scratch/sarjy/PRD.md` and remains the source of truth for product decisions.
 
 ## Cold-start reading order
 

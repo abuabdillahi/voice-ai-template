@@ -45,7 +45,7 @@ const TIER_META: Record<Exclude<Tier, 'unknown'>, TierMeta> = {
     badgeClass:
       'bg-[hsl(var(--tier-routine-soft))] text-[hsl(var(--tier-routine))] border border-[hsl(var(--tier-routine-border))]',
     title: 'Conversation ended.',
-    body: 'Sarjy has ended the session. Your transcript and triage chart are saved below.',
+    body: 'Brook has ended the session. Your transcript and triage chart are saved below.',
     color: 'hsl(var(--tier-routine))',
     bg: 'hsl(var(--tier-routine-soft))',
     border: 'hsl(var(--tier-routine-border))',
@@ -58,7 +58,7 @@ const FALLBACK_META: TierMeta = {
   badgeClass:
     'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] border border-[hsl(var(--border))]',
   title: 'Conversation ended.',
-  body: 'Sarjy has ended the session.',
+  body: 'Brook has ended the session.',
   color: 'hsl(var(--muted-foreground))',
   bg: 'hsl(var(--muted))',
   border: 'hsl(var(--border))',
@@ -155,8 +155,8 @@ export function EndOfConversationCard({ signal }: { signal: SessionEndSignal }) 
             drops it; the routing copy above already carries the
             load-bearing message. */}
         <p className="mt-3 hidden text-xs text-[hsl(var(--muted-foreground))] sm:block">
-          Sarjy is an educational tool, not a doctor. The next step above takes priority over
-          anything Sarjy has discussed in this session.
+          limber is an educational tool, not a doctor. The next step above takes priority over
+          anything Brook has discussed in this session.
         </p>
       </div>
     </section>

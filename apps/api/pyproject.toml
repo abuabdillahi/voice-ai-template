@@ -27,7 +27,7 @@ packages = ["api"]
 
 [tool.pytest.ini_options]
 # Override the workspace-level testpaths so this package only runs its
-# own tests; otherwise running `pnpm --filter @sarjy/api test` from
+# own tests; otherwise running `pnpm --filter @limber/api test` from
 # this directory would also collect every other package's suite.
 testpaths = ["tests"]
 addopts = "-ra"

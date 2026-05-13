@@ -1,7 +1,7 @@
 import { Link, useNavigate } from '@tanstack/react-router';
 
 import { supabase } from '@/lib/supabase';
-import { SarjyWordmark } from '@/components/sarjy-logo';
+import { LimberWordmark } from '@/components/brand';
 import { ThemeSwitcher } from '@/components/theme-switcher';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -17,10 +17,10 @@ export function AppHeader({ active }: AppHeaderProps) {
     <header className="sticky top-0 z-10 flex items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--background))]/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-[hsl(var(--background))]/85">
       <Link
         to="/"
-        aria-label="Sarjy home"
+        aria-label="limber home"
         className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
       >
-        <SarjyWordmark size={26} />
+        <LimberWordmark size={22} />
       </Link>
       <nav className="flex items-center gap-1">
         <Button asChild variant="ghost" size="sm">
